@@ -17,6 +17,13 @@ Write-Host "========================================================" -Foregroun
 Write-Host "                 FLUXMIRROR PUBLIC LAUNCHER             " -ForegroundColor Cyan
 Write-Host "========================================================" -ForegroundColor Cyan
 
+# 0. If run locally from a cloned repository with binaries present, launch immediately
+if ($PSScriptRoot -and (Test-Path "$PSScriptRoot\start.bat") -and ((Test-Path "$PSScriptRoot\bin\FluxMirror.exe") -or (Test-Path "$PSScriptRoot\build-win64\app\scrcpy.exe"))) {
+    Write-Host "[+] Local repository detected, launching via local start.bat..." -ForegroundColor Green
+    & cmd.exe /c "call `"$PSScriptRoot\start.bat`"" $args
+    return
+}
+
 # 1. Query GitHub Releases for the latest version
 $ReleaseInfo = $null
 try {
