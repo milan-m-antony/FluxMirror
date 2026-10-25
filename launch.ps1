@@ -61,11 +61,11 @@ Start-Sleep -Milliseconds 600
 
 if ($Float) {
     if (Test-Path $chrome) {
-        Start-Process $chrome -ArgumentList "--app=http://localhost:5173 --window-size=440,940"
+        Start-Process $chrome -ArgumentList "--app=http://localhost:5173?float=true --window-size=420,880"
     } elseif (Test-Path $edge) {
-        Start-Process $edge -ArgumentList "--app=http://localhost:5173 --window-size=440,940"
+        Start-Process $edge -ArgumentList "--app=http://localhost:5173?float=true --window-size=420,880"
     } else {
-        Start-Process "http://localhost:5173"
+        Start-Process "http://localhost:5173?float=true"
     }
 } else {
     Start-Process "http://localhost:5173"
