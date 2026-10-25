@@ -7,21 +7,48 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-windows:
+    name: Windows UCRT64 Native Build
+    runs-on: windows-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - name: Setup MSYS2 UCRT64 Environment
+        uses: msys2/setup-msys2@v2
         with:
-          node-version: 20
-          cache: 'npm'
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-libusb
+            mingw-w64-ucrt-x86_64-sdl3
 
-      - name: Install Dependencies
-        run: npm ci
+      - name: Configure & Compile FluxMirror Native Engine
+        shell: msys2 {0}
+        run: |
+          meson setup build -Dcompile_server=false -Dprebuilt_server=scrcpy-server -Dportable=true --buildtype=release
+          ninja -C build
+          cp build/app/scrcpy.exe bin/FluxMirror.exe
 
-      - name: Build Web Application
-        run: npm run build
+      - name: Verify Portable Binary
+        shell: pwsh
+        run: |
+          if (Test-Path "bin\FluxMirror.exe") {
+            $size = (Get-Item "bin\FluxMirror.exe").Length
+            Write-Host "✓ FluxMirror binary verified successfully! Size: $size bytes"
+          } else {
+            Write-Error "Error: bin\FluxMirror.exe was not produced!"
+            exit 1
+          }
+
+      - name: Upload Native Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FluxMirror-Windows-x64
+          path: bin/FluxMirror.exe
+          if-no-files-found: error

@@ -249,23 +249,12 @@ executable('scrcpy', src,
 # <https://mesonbuild.com/Builtin-options.html#directories>
 datadir = get_option('datadir') # by default 'share'
 
-install_man('scrcpy.1')
-install_data('data/scrcpy.png',
-             install_dir: datadir / 'icons/hicolor/256x256/apps')
-install_data('data/disconnected.png',
-             install_dir: datadir / 'icons/hicolor/256x256/apps')
-install_data('data/zsh-completion/_scrcpy',
-             install_dir: datadir / 'zsh/site-functions')
-install_data('data/bash-completion/scrcpy',
-             install_dir: datadir / 'bash-completion/completions')
-
-# Desktop entry file for application launchers
-if host_machine.system() == 'linux'
-    # Install a launcher (ex: /usr/local/share/applications/scrcpy.desktop)
-    install_data('data/scrcpy.desktop',
-                 install_dir: datadir / 'applications')
-    install_data('data/scrcpy-console.desktop',
-                 install_dir: datadir / 'applications')
+# Data installation for Linux system packages
+if host_machine.system() == 'linux' and not get_option('portable')
+    install_data('data/scrcpy.png',
+                 install_dir: datadir / 'icons/hicolor/256x256/apps')
+    install_data('data/disconnected.png',
+                 install_dir: datadir / 'icons/hicolor/256x256/apps')
 endif
 
 
