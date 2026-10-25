@@ -6,18 +6,17 @@ import {
   Square,
   CheckCircle2,
   RotateCw,
-  Power,
-  Smartphone
+  Power
 } from 'lucide-react';
 
 export function App() {
-  const [deviceModel, setDeviceModel] = useState<string>('Connecting...');
+  const [deviceModel, setDeviceModel] = useState<string>('Android Device');
   const [deviceSerial, setDeviceSerial] = useState<string>('');
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const [frameUrl, setFrameUrl] = useState<string>('/api/frame');
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [aspectRatio, setAspectRatio] = useState<number>(9 / 19.5);
+  const [isLandscape, setIsLandscape] = useState<boolean>(false);
 
   const imgRef = useRef<HTMLImageElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -29,25 +28,20 @@ export function App() {
     setTimeout(() => setToastMessage(null), 2000);
   };
 
-  // Fetch device information & resolution
+  // Fetch device information
   const checkDevice = useCallback(async () => {
     try {
       const res = await fetch('/api/device-info');
       if (res.ok) {
         const data = await res.json();
         setDeviceSerial(data.device || '');
-        setDeviceModel(data.model || 'Android Device');
-        if (data.width && data.height) {
-          setAspectRatio(data.width / data.height);
-        }
+        setDeviceModel(data.model || 'SM-G990B2');
         setIsConnected(true);
       } else {
         setIsConnected(false);
-        setDeviceModel('No Device');
       }
     } catch {
       setIsConnected(false);
-      setDeviceModel('Searching...');
     }
   }, []);
 
@@ -73,8 +67,8 @@ export function App() {
             const newUrl = URL.createObjectURL(blob);
             setFrameUrl(newUrl);
 
-            // Clean up previous blob URL to avoid memory leak
-            if (currentBlobUrlRef.current) {
+            // Clean up previous blob URL to prevent memory accumulation
+            if (currentBlobUrlRef.current && currentBlobUrlRef.current !== '/api/frame') {
               URL.revokeObjectURL(currentBlobUrlRef.current);
             }
             currentBlobUrlRef.current = newUrl;
@@ -86,7 +80,7 @@ export function App() {
       } finally {
         isFetchingRef.current = false;
         if (!isCancelled) {
-          setTimeout(pullNextFrame, 100);
+          setTimeout(pullNextFrame, 120);
         }
       }
     };
@@ -95,7 +89,7 @@ export function App() {
 
     return () => {
       isCancelled = true;
-      if (currentBlobUrlRef.current) {
+      if (currentBlobUrlRef.current && currentBlobUrlRef.current !== '/api/frame') {
         URL.revokeObjectURL(currentBlobUrlRef.current);
       }
     };
@@ -148,10 +142,8 @@ export function App() {
     const distance = Math.sqrt(dx * dx + dy * dy);
 
     if (distance < 15) {
-      // Tap
       sendAction({ type: 'tap', x: endCoords.x, y: endCoords.y });
     } else {
-      // Swipe / Drag
       sendAction({
         type: 'swipe',
         x1: startCoords.x,
@@ -213,10 +205,26 @@ export function App() {
     }
   };
 
+  // Toggle Screen Rotation
+  const handleToggleRotate = () => {
+    const next = !isLandscape;
+    setIsLandscape(next);
+    sendAction({ type: 'rotate' });
+    showToast(next ? 'Landscape Mode' : 'Portrait Mode');
+  };
+
+  // Power / Lock Screen
+  const handlePowerLock = () => {
+    sendAction({ type: 'key', code: 26 });
+    showToast('Power / Lock Screen');
+  };
+
+  const activeAspectRatio = isLandscape ? 19.5 / 9 : 9 / 19.5;
+
   return (
     <div className="mirror-app">
-      {/* Centered Phone Chassis with Exact Responsive Aspect Ratio */}
-      <div className="phone-container" style={{ aspectRatio }}>
+      {/* Centered Phone Chassis with Responsive Fixed Aspect Ratio */}
+      <div className="phone-container" style={{ aspectRatio: activeAspectRatio }}>
         {/* Top Floating Control Bar */}
         <div className="mirror-topbar">
           <div className="device-status">
@@ -239,7 +247,7 @@ export function App() {
 
             <button
               className="btn-icon"
-              onClick={() => sendAction({ type: 'key', code: 130 })}
+              onClick={handleToggleRotate}
               title="Rotate Screen"
             >
               <RotateCw size={13} />
@@ -247,7 +255,7 @@ export function App() {
 
             <button
               className="btn-icon"
-              onClick={() => sendAction({ type: 'key', code: 26 })}
+              onClick={handlePowerLock}
               title="Power / Lock"
             >
               <Power size={13} color="#ef4444" />
@@ -255,25 +263,18 @@ export function App() {
           </div>
         </div>
 
-        {/* Phone Viewport */}
+        {/* Live Phone Display Viewport */}
         <div className="phone-viewport">
-          {frameUrl ? (
-            <img
-              ref={imgRef}
-              src={frameUrl}
-              alt="Android Screen"
-              className="phone-display-img"
-              onPointerDown={handlePointerDown}
-              onPointerUp={handlePointerUp}
-              onWheel={handleWheel}
-              draggable={false}
-            />
-          ) : (
-            <div className="loading-display">
-              <Smartphone size={36} color="#ff6b00" className="pulse-icon" />
-              <span>Connecting to {deviceModel}...</span>
-            </div>
-          )}
+          <img
+            ref={imgRef}
+            src={frameUrl}
+            alt="Android Device Screen"
+            className="phone-display-img"
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+            onWheel={handleWheel}
+            draggable={false}
+          />
         </div>
 
         {/* Android Bottom Navigation Dock */}

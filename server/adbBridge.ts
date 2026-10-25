@@ -131,39 +131,41 @@ export function adbBridgePlugin(): Plugin {
         }
       });
 
-      // 3. Screen Frame Capture (Cached Buffer & Streaming)
+      // 3. Screen Frame Capture (Instant Cached Buffer & Continuous Pipeline)
       let cachedFrame: Buffer | null = null;
-      let isCapturingFrame = false;
-      let lastCaptureTimestamp = 0;
+      let currentPromise: Promise<Buffer | null> | null = null;
 
-      const triggerCapture = async (device: string): Promise<Buffer | null> => {
-        if (isCapturingFrame) return cachedFrame;
-        isCapturingFrame = true;
-        try {
-          const buf = await new Promise<Buffer>((resolve, reject) => {
-            const proc = spawn(adbPath, ['-s', device, 'exec-out', 'screencap', '-p']);
-            const chunks: Buffer[] = [];
-            proc.stdout.on('data', chunk => chunks.push(chunk));
-            proc.stderr.on('data', () => {});
-            proc.on('close', (code) => {
-              if (code === 0 && chunks.length > 0) {
-                resolve(Buffer.concat(chunks));
-              } else {
-                reject(new Error(`Screencap failed code ${code}`));
-              }
-            });
-            proc.on('error', reject);
+      const triggerCapture = (device: string): Promise<Buffer | null> => {
+        if (currentPromise) return currentPromise;
+
+        currentPromise = new Promise<Buffer | null>((resolve) => {
+          const proc = spawn(adbPath, ['-s', device, 'exec-out', 'screencap', '-p']);
+          const chunks: Buffer[] = [];
+          proc.stdout.on('data', chunk => chunks.push(chunk));
+          proc.stderr.on('data', () => {});
+          proc.on('close', (code) => {
+            currentPromise = null;
+            if (code === 0 && chunks.length > 0) {
+              cachedFrame = Buffer.concat(chunks);
+              resolve(cachedFrame);
+            } else {
+              resolve(cachedFrame);
+            }
           });
+          proc.on('error', () => {
+            currentPromise = null;
+            resolve(cachedFrame);
+          });
+        });
 
-          cachedFrame = buf;
-          lastCaptureTimestamp = Date.now();
-          return buf;
-        } catch {
-          return cachedFrame;
-        } finally {
-          isCapturingFrame = false;
-        }
+        return currentPromise;
       };
+
+      // Pre-warm initial frame on server startup
+      const initialDev = resolveTargetDevice();
+      if (initialDev) {
+        triggerCapture(initialDev);
+      }
 
       server.middlewares.use('/api/frame', async (req, res) => {
         const url = new URL(req.url || '', 'http://localhost');
@@ -175,15 +177,19 @@ export function adbBridgePlugin(): Plugin {
           return res.end('No device connected');
         }
 
-        const now = Date.now();
-        // Return cached frame immediately if fresh (< 400ms)
-        if (cachedFrame && (now - lastCaptureTimestamp < 400)) {
+        // Return cached frame immediately for instant response (< 5ms)
+        if (cachedFrame && cachedFrame.length > 0) {
           res.setHeader('Content-Type', 'image/png');
           res.setHeader('Content-Length', cachedFrame.length);
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          return res.end(cachedFrame);
+          res.end(cachedFrame);
+
+          // Trigger background capture to keep frame fresh
+          triggerCapture(device);
+          return;
         }
 
+        // First frame: await capture
         const frame = await triggerCapture(device);
         if (frame && frame.length > 0) {
           res.setHeader('Content-Type', 'image/png');
@@ -196,7 +202,7 @@ export function adbBridgePlugin(): Plugin {
         }
       });
 
-      // 4. Action Dispatcher (Tap, Swipe, Keyevent, Text Typing)
+      // 4. Action Dispatcher (Tap, Swipe, Keyevent, Text Typing, Rotate, Power)
       server.middlewares.use('/api/action', (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405;
@@ -222,6 +228,8 @@ export function adbBridgePlugin(): Plugin {
               cmd = `"${adbPath}" -s ${device} shell input swipe ${Math.round(data.x1)} ${Math.round(data.y1)} ${Math.round(data.x2)} ${Math.round(data.y2)} ${dur}`;
             } else if (data.type === 'key' && data.code) {
               cmd = `"${adbPath}" -s ${device} shell input keyevent ${data.code}`;
+            } else if (data.type === 'rotate') {
+              cmd = `"${adbPath}" -s ${device} shell "settings put system accelerometer_rotation 1"`;
             } else if (data.type === 'text' && data.text) {
               const escaped = data.text.replace(/([ "$\\])/g, '\\$1');
               cmd = `"${adbPath}" -s ${device} shell input text "${escaped}"`;
@@ -229,6 +237,8 @@ export function adbBridgePlugin(): Plugin {
 
             if (cmd) {
               execSync(cmd);
+              // Trigger fresh frame capture after action
+              setTimeout(() => triggerCapture(device), 150);
             }
 
             res.setHeader('Content-Type', 'application/json');
