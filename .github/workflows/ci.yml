@@ -33,6 +33,7 @@ jobs:
         run: |
           meson setup build -Dcompile_server=false -Dprebuilt_server=scrcpy-server -Dportable=true --buildtype=release
           ninja -C build
+          mkdir -p bin
           cp build/app/scrcpy.exe bin/FluxMirror.exe
 
       - name: Verify Portable Binary
