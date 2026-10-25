@@ -110,7 +110,7 @@ if ($devs) {
 }
 
 # Launch scrcpy with always-on-top, stay-awake, and custom window title
-Start-Process -FilePath $scrcpy -WorkingDirectory $scrcpyDir -ArgumentList "$devArg --window-title `"Flux Mirror`" --always-on-top --stay-awake"
+Start-Process -FilePath $scrcpy -WorkingDirectory $scrcpyDir -ArgumentList "$devArg --window-title `"FluxMirror`" --always-on-top --stay-awake"
 
 Write-Host "[+] Live 60 FPS Direct3D11 Mirror is active!" -ForegroundColor Green
 Write-Host "    - Left Click: Tap / Drag / Swipe" -ForegroundColor DarkGray

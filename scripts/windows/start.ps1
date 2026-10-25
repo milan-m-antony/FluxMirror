@@ -107,26 +107,26 @@ if ($Snap) {
 Write-Host "`n[+] Launching dedicated native mirror window..." -ForegroundColor Cyan
 $scrcpyDir = [System.IO.Path]::GetDirectoryName($nativeBin)
 
-$mirrorArgs = @(
-    "-s", $targetSerial,
-    "--window-title", "FluxMirror - $model ($streamFps FPS)",
-    "--max-fps", $streamFps,
-    "--video-buffer", "0",
-    "--video-codec", "h264",
-    "--video-bit-rate", "16M",
+$argsList = @(
+    "-s $targetSerial",
+    "--window-title `"FluxMirror`"",
+    "--max-fps $streamFps",
+    "--video-buffer 0",
+    "--video-codec h264",
+    "--video-bit-rate 16M",
     "--stay-awake",
     "--print-fps"
 )
 
 if ($AlwaysOnTop) {
-    $mirrorArgs += "--always-on-top"
+    $argsList += "--always-on-top"
 }
 
 if ($Wifi) {
-    $mirrorArgs += "--tcpip"
+    $argsList += "--tcpip"
 }
 
-Start-Process -FilePath $nativeBin -WorkingDirectory $scrcpyDir -ArgumentList ($mirrorArgs -join " ")
+Start-Process -FilePath $nativeBin -WorkingDirectory $scrcpyDir -ArgumentList ($argsList -join " ")
 
 # 8. Attach floating screenshot companion dock
 $dockScript = "$rootDir\tools\screenshot_dock.ps1"
