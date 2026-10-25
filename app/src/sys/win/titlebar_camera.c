@@ -133,53 +133,153 @@ capture_screenshot_worker(void *arg) {
     CloseHandle(pi.hProcess);
     CloseHandle(hFile);
 
+    // Read raw PNG bytes for direct "PNG" clipboard registration
+    void *png_bytes = NULL;
+    long png_file_len = 0;
+    FILE *fp = fopen(temp_file, "rb");
+    if (fp) {
+        fseek(fp, 0, SEEK_END);
+        png_file_len = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        if (png_file_len > 0) {
+            png_bytes = malloc(png_file_len);
+            if (png_bytes) {
+                fread(png_bytes, 1, png_file_len, fp);
+            }
+        }
+        fclose(fp);
+    }
+
     SDL_Surface *surface = sc_icon_load_from_full_path(temp_file);
     DeleteFileA(temp_file);
 
     if (!surface) {
         LOGE("Failed to decode screenshot image");
+        if (png_bytes) {
+            free(png_bytes);
+        }
         s_is_capturing = false;
         return 0;
     }
 
     int w = surface->w;
     int h = surface->h;
+    size_t raw_stride = (size_t) w * 4;
+    size_t raw_pixels_size = raw_stride * (size_t) h;
 
-    BITMAPINFO bmi;
-    memset(&bmi, 0, sizeof(bmi));
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = w;
-    bmi.bmiHeader.biHeight = -h; // Top-down DIB
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
+    void *top_down_bgra = malloc(raw_pixels_size);
+    if (!top_down_bgra) {
+        LOG_OOM();
+        SDL_DestroySurface(surface);
+        if (png_bytes) {
+            free(png_bytes);
+        }
+        s_is_capturing = false;
+        return 0;
+    }
 
-    HDC hdc = GetDC(NULL);
-    void *pBits = NULL;
-    HBITMAP hBitmap = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &pBits, NULL, 0);
-    if (hBitmap && pBits) {
-        bool ok = SDL_ConvertPixels(w, h, surface->format, surface->pixels, surface->pitch,
-                                    SDL_PIXELFORMAT_BGRA32, pBits, w * 4);
-        if (ok) {
-            if (OpenClipboard(s_main_hwnd)) {
-                EmptyClipboard();
-                SetClipboardData(CF_BITMAP, hBitmap);
-                CloseClipboard();
-                MessageBeep(MB_OK);
-                LOGI("Screenshot copied to Windows clipboard: %dx%d", w, h);
+    bool conv_ok = SDL_ConvertPixels(w, h, surface->format, surface->pixels, surface->pitch,
+                                     SDL_PIXELFORMAT_BGRA32, top_down_bgra, raw_stride);
+    SDL_DestroySurface(surface);
 
-                if (s_cam_hwnd && IsWindow(s_cam_hwnd)) {
-                    PostMessage(s_cam_hwnd, WM_SHOW_TOAST, 0, 0);
-                }
-            } else {
-                DeleteObject(hBitmap);
-            }
-        } else {
-            DeleteObject(hBitmap);
+    if (!conv_ok) {
+        LOGE("Failed to convert screenshot to BGRA32");
+        free(top_down_bgra);
+        if (png_bytes) {
+            free(png_bytes);
+        }
+        s_is_capturing = false;
+        return 0;
+    }
+
+    // 1. Allocate and populate CF_DIB (standard bottom-up Windows DIB)
+    size_t dib_size = sizeof(BITMAPINFOHEADER) + raw_pixels_size;
+    HGLOBAL hDib = GlobalAlloc(GMEM_MOVEABLE, dib_size);
+    if (!hDib) {
+        LOG_OOM();
+        free(top_down_bgra);
+        if (png_bytes) {
+            free(png_bytes);
+        }
+        s_is_capturing = false;
+        return 0;
+    }
+
+    void *pDib = GlobalLock(hDib);
+    BITMAPINFOHEADER *hdr = (BITMAPINFOHEADER *) pDib;
+    memset(hdr, 0, sizeof(BITMAPINFOHEADER));
+    hdr->biSize = sizeof(BITMAPINFOHEADER);
+    hdr->biWidth = w;
+    hdr->biHeight = h; // POSITIVE height for standard bottom-up Windows DIB!
+    hdr->biPlanes = 1;
+    hdr->biBitCount = 32;
+    hdr->biCompression = BI_RGB;
+    hdr->biSizeImage = raw_pixels_size;
+    hdr->biXPelsPerMeter = 2835; // ~72 DPI
+    hdr->biYPelsPerMeter = 2835;
+
+    uint8_t *dst_pixels = (uint8_t *) pDib + sizeof(BITMAPINFOHEADER);
+    for (int y = 0; y < h; y++) {
+        // Destination row is bottom-up (h - 1 - y)
+        uint8_t *dst_row = dst_pixels + (size_t) (h - 1 - y) * raw_stride;
+        const uint8_t *src_row = (const uint8_t *) top_down_bgra + (size_t) y * raw_stride;
+        memcpy(dst_row, src_row, raw_stride);
+    }
+    GlobalUnlock(hDib);
+
+    // 2. Create CF_BITMAP (standard GDI compatible bitmap DDB)
+    HDC screen_dc = GetDC(NULL);
+    HBITMAP hBmp = CreateCompatibleBitmap(screen_dc, w, h);
+    if (hBmp) {
+        BITMAPINFO bmi;
+        memset(&bmi, 0, sizeof(bmi));
+        bmi.bmiHeader = *hdr;
+        SetDIBits(screen_dc, hBmp, 0, h, dst_pixels, &bmi, DIB_RGB_COLORS);
+    }
+    ReleaseDC(NULL, screen_dc);
+
+    free(top_down_bgra);
+
+    // 3. Allocate "PNG" format
+    UINT cf_png = RegisterClipboardFormatA("PNG");
+    HGLOBAL hPng = NULL;
+    if (png_bytes && png_file_len > 0) {
+        hPng = GlobalAlloc(GMEM_MOVEABLE, png_file_len);
+        if (hPng) {
+            void *pPng = GlobalLock(hPng);
+            memcpy(pPng, png_bytes, png_file_len);
+            GlobalUnlock(hPng);
+        }
+        free(png_bytes);
+    }
+
+    // 4. Inject all formats into Windows Clipboard
+    if (OpenClipboard(s_main_hwnd)) {
+        EmptyClipboard();
+        SetClipboardData(CF_DIB, hDib);
+        if (hBmp) {
+            SetClipboardData(CF_BITMAP, hBmp);
+        }
+        if (hPng) {
+            SetClipboardData(cf_png, hPng);
+        }
+        CloseClipboard();
+        MessageBeep(MB_OK);
+        LOGI("Screenshot successfully copied to clipboard: %dx%d (CF_DIB, CF_BITMAP, PNG)", w, h);
+
+        if (s_cam_hwnd && IsWindow(s_cam_hwnd)) {
+            PostMessage(s_cam_hwnd, WM_SHOW_TOAST, 0, 0);
+        }
+    } else {
+        LOGE("Failed to open Windows clipboard");
+        GlobalFree(hDib);
+        if (hBmp) {
+            DeleteObject(hBmp);
+        }
+        if (hPng) {
+            GlobalFree(hPng);
         }
     }
-    ReleaseDC(NULL, hdc);
-    SDL_DestroySurface(surface);
 
     s_is_capturing = false;
     return 0;
