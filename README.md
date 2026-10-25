@@ -37,27 +37,26 @@ FluxMirror is built from the ground up for high-performance cross-platform opera
 - **🪟 Persistent Floating Window (Always-On-Top):**
   - Window defaults to floating mode (`--always-on-top`), remaining pinned above code editors, terminals, and browsers while you type code.
   - Does not hide, lose focus, or minimize when interacting with background applications.
-- **🛜 1-Click Wireless ADB Switcher:**
-  - One-click migration from wired USB to wireless high-speed mirroring.
-  - Automatically initializes `adb tcpip 5555`, queries the phone's local Wi-Fi IP address, and verifies wireless ADB connection.
-  - Displays a vector Wi-Fi badge in the title bar that turns **emerald green (`#10B981`)** when connected wirelessly.
-  - **Unplugging the USB cable** allows mirroring to continue seamlessly over Wi-Fi without interrupting your session.
-- **📱 Multi-Device Title Bar Dropdown:**
-  - Sleek dark pill dropdown button (`[ 📱 <Model> ▼ ]`) integrated directly into the window title bar.
-  - Displays the active device model (e.g. `SM_G990B2`) with responsive compact fallback for narrow viewports.
-  - 1-click native menu displays all connected devices, serials, and connection transport (USB or Wi-Fi).
-  - Effortlessly switch between multiple test phones or BLE bridge devices on the fly without restarting or re-running scripts.
+- **🔥 Unified FluxMirror Brand Control Menu:**
+  - Integrated interactive brand pill (`[ 🔥 FluxMirror ▾ ]`) positioned gracefully on the top-left of the title bar with drag pass-through support.
+  - Left-clicking opens the native **Device Control Center**:
+    - **Active Device Indicator & Switcher**: Submenu displaying the active model (e.g. `SM_G990B2`), all connected USB/Wi-Fi devices, and instant 1-click device switching.
+    - **1-Click Wireless ADB Switcher**: Automatically initializes `adb tcpip 5555`, queries device Wi-Fi IP, connects over port 5555, and seamlessly switches to wireless mirroring.
+    - **Take Screenshot**: Triggers silent snapshot directly to clipboard.
+    - **Turn Device Screen Off**: Turns physical phone screen off while keeping desktop mirror stream running (`keyevent 223`).
+    - **Refresh Device List**: Instant re-scan of connected ADB devices.
 - **📷 Integrated Title Bar Camera Notch Screenshot Button:**
-  - Built directly into the native window controls logic (replacing the Maximize button to maintain strict phone aspect ratio).
+  - Built directly into the native window controls logic (docked replacing the Maximize button to maintain strict phone aspect ratio).
   - Sleek vector camera notch icon styled for dark title bars with subtle hover and pressed states.
   - Includes native tooltip: *"Take Screenshot (Copy to Clipboard)"*.
 - **📋 Direct-to-Clipboard Multi-Format Capture & HUD Toast:**
   - One click on the Camera button captures a full-resolution screen snapshot silently via ADB without flashing command prompt windows.
   - Ingests image into the system clipboard simultaneously as **`CF_DIB`** (bottom-up standard DIB), **`CF_BITMAP`** (GDI bitmap), and **`PNG`**, enabling immediate pasting (`Ctrl + V` / `Cmd + V`) across all applications (Paint, Word, Discord, Telegram, Slack, browsers).
   - Displays a centered, auto-dismissing in-window HUD toast: **`✓ Copied to clipboard`** with audio chime.
-- **📐 Aspect-Ratio Locking & Streamlined Controls:**
+- **📐 Ultra-Clean Title Bar & Aspect-Ratio Preservation:**
   - Strictly preserves mobile aspect ratio (e.g. 1080×2340 or 1080×2400) without stretching or letterboxing.
-  - Clean **Minimize (`─`)** and **Close (`✕`)** buttons remain fully functional.
+  - Right side strictly hosts **only three streamlined controls**: **Minimize (`─`)**, **Camera Notch (`📷`)**, and **Close (`✕`)**.
+  - Maximum clear caption area reserved for smooth native Windows window dragging, snapping, and Aero gestures.
 
 ---
 

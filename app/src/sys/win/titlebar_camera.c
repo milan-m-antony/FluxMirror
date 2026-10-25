@@ -47,10 +47,10 @@ typedef struct {
 
 static HWND s_main_hwnd = NULL;
 static HWND s_cam_hwnd = NULL;
-static HWND s_wifi_hwnd = NULL;
-static HWND s_device_hwnd = NULL;
+static HWND s_menu_hwnd = NULL;
 static HWND s_toast_hwnd = NULL;
 static HWND s_tooltip_hwnd = NULL;
+static HICON s_app_icon = NULL;
 static WNDPROC s_orig_wndproc = NULL;
 
 static char s_serial[128] = {0};
@@ -59,10 +59,8 @@ static char s_toast_message[128] = "Copied to clipboard";
 
 static bool s_cam_hovered = false;
 static bool s_cam_pressed = false;
-static bool s_wifi_hovered = false;
-static bool s_wifi_pressed = false;
-static bool s_dev_hovered = false;
-static bool s_dev_pressed = false;
+static bool s_menu_hovered = false;
+static bool s_menu_pressed = false;
 
 static bool s_is_capturing = false;
 static bool s_is_switching_wifi = false;
@@ -70,6 +68,8 @@ static bool s_is_switching_wifi = false;
 static void reposition_controls(void);
 static void show_custom_toast(const char *msg);
 static void switch_to_target_device(const char *target_serial);
+static void show_flux_menu_at_point(int screenX, int screenY);
+static void trigger_capture(void);
 
 // ---------------------------------------------------------------------------
 // RESOLVE BUNDLED ADB PATH & SILENT PROCESS EXECUTION
@@ -202,8 +202,8 @@ device_model_discovery_worker(void *arg) {
     for (int i = 0; i < count; i++) {
         if (devs[i].is_active || count == 1) {
             snprintf(s_device_model, sizeof(s_device_model), "%s", devs[i].model);
-            if (s_device_hwnd && IsWindow(s_device_hwnd)) {
-                InvalidateRect(s_device_hwnd, NULL, FALSE);
+            if (s_menu_hwnd && IsWindow(s_menu_hwnd)) {
+                InvalidateRect(s_menu_hwnd, NULL, FALSE);
             }
             return 0;
         }
@@ -323,16 +323,19 @@ switch_to_target_device(const char *target_serial) {
 }
 
 // ---------------------------------------------------------------------------
-// DEVICE DROPDOWN MENU
+// FLUXMIRROR BRAND CONTROL MENU
 // ---------------------------------------------------------------------------
 static void
-show_device_dropdown_menu(HWND hwnd) {
+show_flux_menu_at_point(int screenX, int screenY) {
     adb_device_info_t devices[16];
     int count = get_device_list(s_serial, devices, 16);
 
     HMENU hMenu = CreatePopupMenu();
+
+    // 1. Devices submenu
+    HMENU hDevMenu = CreatePopupMenu();
     if (count == 0) {
-        AppendMenuA(hMenu, MF_STRING | MF_GRAYED, 0, "No Devices Found via ADB");
+        AppendMenuA(hDevMenu, MF_STRING | MF_GRAYED, 0, "No Devices Found via ADB");
     } else {
         for (int i = 0; i < count; i++) {
             char item_text[256];
@@ -344,18 +347,34 @@ show_device_dropdown_menu(HWND hwnd) {
             if (devices[i].is_active) {
                 flags |= MF_CHECKED;
             }
-            AppendMenuA(hMenu, flags, 100 + i, item_text);
+            AppendMenuA(hDevMenu, flags, 100 + i, item_text);
         }
     }
+    AppendMenuA(hDevMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hDevMenu, MF_STRING, 202, "Refresh Device List");
+
+    char active_label[256];
+    snprintf(active_label, sizeof(active_label), "Active Device: %s", s_device_model);
+    AppendMenuA(hMenu, MF_POPUP, (UINT_PTR) hDevMenu, active_label);
 
     AppendMenuA(hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(hMenu, MF_STRING, 201, "1-Click Wireless ADB Switcher (Port 5555)");
-    AppendMenuA(hMenu, MF_STRING, 202, "Refresh Device List");
 
-    RECT r;
-    GetWindowRect(hwnd, &r);
+    // 2. Wireless ADB Switcher
+    AppendMenuA(hMenu, MF_STRING, 201, "1-Click Wireless ADB Switcher (Port 5555)");
+
+    // 3. Screenshot Capture
+    AppendMenuA(hMenu, MF_STRING, 203, "Take Screenshot (Copy to Clipboard)");
+
+    AppendMenuA(hMenu, MF_SEPARATOR, 0, NULL);
+
+    // 4. Quick Device Shortcuts
+    AppendMenuA(hMenu, MF_STRING, 204, "Turn Device Screen Off (Keep Mirror Active)");
+
+    AppendMenuA(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(hMenu, MF_STRING | MF_GRAYED, 0, "FluxMirror v5.0.1 - Native Engine");
+
     int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN,
-                             r.left, r.bottom + 2, 0, s_main_hwnd, NULL);
+                             screenX, screenY, 0, s_main_hwnd, NULL);
     DestroyMenu(hMenu);
 
     if (cmd >= 100 && cmd < 100 + count) {
@@ -370,8 +389,20 @@ show_device_dropdown_menu(HWND hwnd) {
         trigger_wireless_adb_switch();
     } else if (cmd == 202) {
         start_device_model_discovery();
-        reposition_controls();
-        InvalidateRect(hwnd, NULL, FALSE);
+        if (s_menu_hwnd && IsWindow(s_menu_hwnd)) InvalidateRect(s_menu_hwnd, NULL, FALSE);
+    } else if (cmd == 203) {
+        trigger_capture();
+    } else if (cmd == 204) {
+        char adb_path[MAX_PATH];
+        get_adb_path(adb_path, sizeof(adb_path));
+        char cmd_power[512];
+        if (s_serial[0] != '\0') {
+            snprintf(cmd_power, sizeof(cmd_power), "\"%s\" -s %s shell input keyevent 223", adb_path, s_serial);
+        } else {
+            snprintf(cmd_power, sizeof(cmd_power), "\"%s\" shell input keyevent 223", adb_path);
+        }
+        run_command_silent(cmd_power, 2000);
+        show_custom_toast("Turned device display off");
     }
 }
 
@@ -841,14 +872,32 @@ CameraBtnWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 }
 
 // ---------------------------------------------------------------------------
-// 1-CLICK WIRELESS BADGE WINDOW PROCEDURE
+// BRAND MENU BUTTON WINDOW PROCEDURE
 // ---------------------------------------------------------------------------
 static LRESULT CALLBACK
-WifiBtnWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+MenuBtnWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    static POINT s_down_pt = {0};
+    static bool s_is_dragging = false;
+
     switch (uMsg) {
         case WM_MOUSEMOVE: {
-            if (!s_wifi_hovered) {
-                s_wifi_hovered = true;
+            POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            if (s_menu_pressed && (wParam & MK_LBUTTON)) {
+                if (abs(pt.x - s_down_pt.x) > 4 || abs(pt.y - s_down_pt.y) > 4) {
+                    s_is_dragging = true;
+                    ReleaseCapture();
+                    s_menu_pressed = false;
+                    s_menu_hovered = false;
+                    InvalidateRect(hwnd, NULL, FALSE);
+                    POINT screenPt = pt;
+                    ClientToScreen(hwnd, &screenPt);
+                    SendMessage(s_main_hwnd, WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(screenPt.x, screenPt.y));
+                    return 0;
+                }
+            }
+
+            if (!s_menu_hovered) {
+                s_menu_hovered = true;
                 InvalidateRect(hwnd, NULL, FALSE);
 
                 TRACKMOUSEEVENT tme;
@@ -861,32 +910,39 @@ WifiBtnWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
         case WM_MOUSELEAVE: {
-            s_wifi_hovered = false;
-            s_wifi_pressed = false;
+            s_menu_hovered = false;
+            s_menu_pressed = false;
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
         case WM_LBUTTONDOWN: {
-            s_wifi_pressed = true;
+            s_menu_pressed = true;
+            s_is_dragging = false;
+            s_down_pt.x = GET_X_LPARAM(lParam);
+            s_down_pt.y = GET_Y_LPARAM(lParam);
             SetCapture(hwnd);
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
         case WM_LBUTTONUP: {
-            if (s_wifi_pressed) {
+            if (s_menu_pressed) {
                 ReleaseCapture();
-                s_wifi_pressed = false;
+                s_menu_pressed = false;
                 InvalidateRect(hwnd, NULL, FALSE);
-
-                RECT r;
-                GetClientRect(hwnd, &r);
-                POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-                if (PtInRect(&r, pt)) {
-                    trigger_wireless_adb_switch();
+                if (!s_is_dragging) {
+                    RECT r;
+                    GetWindowRect(hwnd, &r);
+                    show_flux_menu_at_point(r.left, r.bottom + 2);
                 }
             }
             return 0;
         }
+        case WM_RBUTTONUP: {
+            RECT r;
+            GetWindowRect(hwnd, &r);
+            show_flux_menu_at_point(r.left + GET_X_LPARAM(lParam), r.top + GET_Y_LPARAM(lParam));
+            return 0;
+        }
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
@@ -898,166 +954,57 @@ WifiBtnWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
             HBITMAP memBmp = CreateCompatibleBitmap(hdc, r.right, r.bottom);
             HBITMAP oldBmp = (HBITMAP) SelectObject(memDC, memBmp);
 
-            bool is_wifi_active = (strchr(s_serial, ':') != NULL);
+            HWND activeWnd = GetActiveWindow();
+            bool isActive = (activeWnd == s_main_hwnd || activeWnd == hwnd);
 
-            COLORREF bgColor;
-            COLORREF glyphColor;
-
-            if (s_wifi_pressed) {
-                bgColor = RGB(38, 38, 38);
-                glyphColor = RGB(255, 140, 50);
-            } else if (s_wifi_hovered) {
-                bgColor = RGB(50, 50, 50);
-                glyphColor = is_wifi_active ? RGB(16, 185, 129) : RGB(255, 107, 0);
-            } else {
-                bgColor = RGB(32, 32, 32);
-                glyphColor = is_wifi_active ? RGB(16, 185, 129) : RGB(180, 180, 180);
-            }
-
-            HBRUSH bgBrush = CreateSolidBrush(bgColor);
+            COLORREF tbBg = isActive ? RGB(32, 32, 32) : RGB(43, 43, 43);
+            HBRUSH bgBrush = CreateSolidBrush(tbBg);
             FillRect(memDC, &r, bgBrush);
             DeleteObject(bgBrush);
 
-            int cx = r.right / 2;
-            int cy = r.bottom / 2 + 2;
+            if (s_menu_hovered || s_menu_pressed) {
+                COLORREF pillBg = s_menu_pressed ? RGB(55, 65, 81) : RGB(45, 55, 72);
+                COLORREF pillBorder = s_menu_pressed ? RGB(255, 140, 50) : RGB(255, 107, 0);
 
-            // Draw crisp Wi-Fi wireless arcs
-            HPEN arcPen = CreatePen(PS_SOLID, 2, glyphColor);
-            HPEN oldPen = (HPEN) SelectObject(memDC, arcPen);
-            HBRUSH nullBrush = (HBRUSH) GetStockObject(NULL_BRUSH);
-            HBRUSH oldBrush = (HBRUSH) SelectObject(memDC, nullBrush);
+                HBRUSH pillBrush = CreateSolidBrush(pillBg);
+                HBRUSH oldBrush = (HBRUSH) SelectObject(memDC, pillBrush);
+                HPEN borderPen = CreatePen(PS_SOLID, 1, pillBorder);
+                HPEN oldPen = (HPEN) SelectObject(memDC, borderPen);
 
-            // Outer arc
-            Arc(memDC, cx - 8, cy - 8, cx + 8, cy + 8, cx + 6, cy - 4, cx - 6, cy - 4);
-            // Middle arc
-            Arc(memDC, cx - 5, cy - 5, cx + 5, cy + 5, cx + 4, cy - 2, cx - 4, cy - 2);
+                RoundRect(memDC, r.left + 1, r.top + 1, r.right - 1, r.bottom - 1, 8, 8);
 
-            // Center transmitter dot
-            HBRUSH dotBrush = CreateSolidBrush(glyphColor);
-            HBRUSH oldDot = (HBRUSH) SelectObject(memDC, dotBrush);
-            HPEN nullPen = (HPEN) GetStockObject(NULL_PEN);
-            SelectObject(memDC, nullPen);
-            Ellipse(memDC, cx - 2, cy + 1, cx + 2, cy + 5);
-
-            SelectObject(memDC, oldDot);
-            DeleteObject(dotBrush);
-            SelectObject(memDC, oldBrush);
-            SelectObject(memDC, oldPen);
-            DeleteObject(arcPen);
-
-            BitBlt(hdc, 0, 0, r.right, r.bottom, memDC, 0, 0, SRCCOPY);
-
-            SelectObject(memDC, oldBmp);
-            DeleteObject(memBmp);
-            DeleteDC(memDC);
-
-            EndPaint(hwnd, &ps);
-            return 0;
-        }
-        case WM_ERASEBKGND:
-            return 1;
-        default:
-            return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// MULTI-DEVICE DROPDOWN BUTTON WINDOW PROCEDURE
-// ---------------------------------------------------------------------------
-static LRESULT CALLBACK
-DeviceDropdownBtnWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) {
-        case WM_MOUSEMOVE: {
-            if (!s_dev_hovered) {
-                s_dev_hovered = true;
-                InvalidateRect(hwnd, NULL, FALSE);
-
-                TRACKMOUSEEVENT tme;
-                tme.cbSize = sizeof(tme);
-                tme.dwFlags = TME_LEAVE;
-                tme.hwndTrack = hwnd;
-                tme.dwHoverTime = 0;
-                TrackMouseEvent(&tme);
+                SelectObject(memDC, oldPen);
+                SelectObject(memDC, oldBrush);
+                DeleteObject(borderPen);
+                DeleteObject(pillBrush);
             }
-            return 0;
-        }
-        case WM_MOUSELEAVE: {
-            s_dev_hovered = false;
-            s_dev_pressed = false;
-            InvalidateRect(hwnd, NULL, FALSE);
-            return 0;
-        }
-        case WM_LBUTTONDOWN: {
-            s_dev_pressed = true;
-            InvalidateRect(hwnd, NULL, FALSE);
-            show_device_dropdown_menu(hwnd);
-            s_dev_pressed = false;
-            s_dev_hovered = false;
-            InvalidateRect(hwnd, NULL, FALSE);
-            return 0;
-        }
-        case WM_PAINT: {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
 
-            RECT r;
-            GetClientRect(hwnd, &r);
+            // Draw application icon
+            if (s_app_icon) {
+                DrawIconEx(memDC, r.left + 5, (r.bottom - 16) / 2, s_app_icon, 16, 16, 0, NULL, DI_NORMAL);
+            }
 
-            HDC memDC = CreateCompatibleDC(hdc);
-            HBITMAP memBmp = CreateCompatibleBitmap(hdc, r.right, r.bottom);
-            HBITMAP oldBmp = (HBITMAP) SelectObject(memDC, memBmp);
-
-            COLORREF bgColor = s_dev_pressed ? RGB(55, 65, 81) : (s_dev_hovered ? RGB(45, 55, 72) : RGB(36, 41, 51));
-            COLORREF borderColor = s_dev_hovered ? RGB(255, 107, 0) : RGB(58, 65, 78);
-
-            HBRUSH tbBrush = CreateSolidBrush(RGB(32, 32, 32));
-            FillRect(memDC, &r, tbBrush);
-            DeleteObject(tbBrush);
-
-            // Rounded button pill
-            HBRUSH pillBrush = CreateSolidBrush(bgColor);
-            HBRUSH oldBrush = (HBRUSH) SelectObject(memDC, pillBrush);
-            HPEN borderPen = CreatePen(PS_SOLID, 1, borderColor);
-            HPEN oldPen = (HPEN) SelectObject(memDC, borderPen);
-            RoundRect(memDC, r.left, r.top + 3, r.right - 1, r.bottom - 4, 8, 8);
-            SelectObject(memDC, oldPen);
-            SelectObject(memDC, oldBrush);
-            DeleteObject(borderPen);
-            DeleteObject(pillBrush);
-
-            // Draw miniature phone glyph outline
-            HBRUSH nullBrush = (HBRUSH) GetStockObject(NULL_BRUSH);
-            HBRUSH oldNull = (HBRUSH) SelectObject(memDC, nullBrush);
-            HPEN phonePen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
-            oldPen = (HPEN) SelectObject(memDC, phonePen);
-            RoundRect(memDC, r.left + 5, r.top + 7, r.left + 15, r.bottom - 8, 2, 2);
-            SelectObject(memDC, oldPen);
-            SelectObject(memDC, oldNull);
-            DeleteObject(phonePen);
-
-            // Draw device model text if width allows
+            // Draw "FluxMirror" text
             SetBkMode(memDC, TRANSPARENT);
-            SetTextColor(memDC, RGB(240, 240, 240));
+            SetTextColor(memDC, isActive ? RGB(245, 245, 245) : RGB(190, 190, 190));
+            HFONT hFont = CreateFontW(12, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                      CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                      DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+            HFONT oldFont = (HFONT) SelectObject(memDC, hFont);
+            RECT txtRect = { r.left + 25, r.top, r.right - 14, r.bottom };
+            DrawTextA(memDC, "FluxMirror", -1, &txtRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(memDC, oldFont);
+            DeleteObject(hFont);
 
-            if (r.right > 45) {
-                HFONT hFont = CreateFontW(11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-                                          DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                                          CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                                          DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-                HFONT oldFont = (HFONT) SelectObject(memDC, hFont);
-                RECT txtRect = { r.left + 19, r.top, r.right - 12, r.bottom };
-                DrawTextA(memDC, s_device_model, -1, &txtRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-                SelectObject(memDC, oldFont);
-                DeleteObject(hFont);
-            }
-
-            // Draw down arrow chevron
+            // Draw subtle dropdown chevron "v"
             HFONT hArrowFont = CreateFontW(9, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Symbol");
             HFONT oldAFont = (HFONT) SelectObject(memDC, hArrowFont);
-            RECT arrowRect = { r.right - 13, r.top, r.right - 2, r.bottom };
+            SetTextColor(memDC, s_menu_hovered ? RGB(255, 107, 0) : (isActive ? RGB(180, 180, 180) : RGB(130, 130, 130)));
+            RECT arrowRect = { r.right - 14, r.top, r.right - 3, r.bottom };
             DrawTextW(memDC, L"\x25BC", -1, &arrowRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SelectObject(memDC, oldAFont);
             DeleteObject(hArrowFont);
@@ -1095,17 +1042,14 @@ reposition_controls(void) {
     }
 
     static int s_last_cam_x = -9999, s_last_cam_y = -9999, s_last_cam_w = -1, s_last_cam_h = -1;
-    static int s_last_wifi_x = -9999, s_last_wifi_y = -9999, s_last_wifi_w = -1, s_last_wifi_h = -1;
-    static int s_last_dev_x = -9999, s_last_dev_y = -9999, s_last_dev_w = -1, s_last_dev_h = -1;
+    static int s_last_menu_x = -9999, s_last_menu_y = -9999, s_last_menu_w = -1, s_last_menu_h = -1;
 
     if (IsIconic(s_main_hwnd) || !IsWindowVisible(s_main_hwnd)) {
         if (s_cam_hwnd && IsWindow(s_cam_hwnd)) ShowWindow(s_cam_hwnd, SW_HIDE);
-        if (s_wifi_hwnd && IsWindow(s_wifi_hwnd)) ShowWindow(s_wifi_hwnd, SW_HIDE);
-        if (s_device_hwnd && IsWindow(s_device_hwnd)) ShowWindow(s_device_hwnd, SW_HIDE);
+        if (s_menu_hwnd && IsWindow(s_menu_hwnd)) ShowWindow(s_menu_hwnd, SW_HIDE);
         if (s_toast_hwnd && IsWindow(s_toast_hwnd)) ShowWindow(s_toast_hwnd, SW_HIDE);
         s_last_cam_x = -9999;
-        s_last_wifi_x = -9999;
-        s_last_dev_x = -9999;
+        s_last_menu_x = -9999;
         s_in_reposition = false;
         return;
     }
@@ -1121,7 +1065,7 @@ reposition_controls(void) {
     GetWindowRect(s_main_hwnd, &winRect);
     int winWidth = winRect.right - winRect.left;
 
-    // 1. Camera button replaces Maximize button
+    // 1. Camera button replaces Maximize button on the right
     int camX, camY, camW, camH;
     if (maxRect.right > maxRect.left && maxRect.bottom > maxRect.top) {
         camX = maxRect.left;
@@ -1141,18 +1085,13 @@ reposition_controls(void) {
         camY = winRect.top + 3;
     }
 
-    // 2. Wireless Badge immediately to the left of the leftmost title button
-    int leftControlX = (minRect.right > minRect.left && minRect.left < camX) ? minRect.left : camX;
-    int wifiW = 32;
-    int wifiH = (minRect.bottom > minRect.top) ? (minRect.bottom - minRect.top) : camH;
-    int wifiX = leftControlX - wifiW;
-    int wifiY = (minRect.bottom > minRect.top) ? minRect.top : camY;
-
-    // 3. Multi-Device Dropdown immediately to the left of Wireless Badge
-    int devW = (winWidth < 380) ? 30 : 96;
-    int devH = wifiH;
-    int devX = wifiX - devW - 2;
-    int devY = wifiY;
+    // 2. FluxMirror Brand Menu Button on top-left of titlebar
+    int tbTop = (tbi.rcTitleBar.bottom > tbi.rcTitleBar.top) ? tbi.rcTitleBar.top : (winRect.top + 1);
+    int tbH = (tbi.rcTitleBar.bottom > tbi.rcTitleBar.top) ? (tbi.rcTitleBar.bottom - tbi.rcTitleBar.top) : 31;
+    int menuX = winRect.left + 6;
+    int menuY = tbTop + 2;
+    int menuW = 114;
+    int menuH = (tbH > 6) ? (tbH - 4) : 26;
 
     if (s_cam_hwnd && IsWindow(s_cam_hwnd)) {
         if (!IsWindowVisible(s_cam_hwnd) || camX != s_last_cam_x || camY != s_last_cam_y || camW != s_last_cam_w || camH != s_last_cam_h) {
@@ -1162,18 +1101,10 @@ reposition_controls(void) {
         }
     }
 
-    if (s_wifi_hwnd && IsWindow(s_wifi_hwnd)) {
-        if (!IsWindowVisible(s_wifi_hwnd) || wifiX != s_last_wifi_x || wifiY != s_last_wifi_y || wifiW != s_last_wifi_w || wifiH != s_last_wifi_h) {
-            s_last_wifi_x = wifiX; s_last_wifi_y = wifiY; s_last_wifi_w = wifiW; s_last_wifi_h = wifiH;
-            SetWindowPos(s_wifi_hwnd, HWND_TOP, wifiX, wifiY, wifiW, wifiH,
-                         SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        }
-    }
-
-    if (s_device_hwnd && IsWindow(s_device_hwnd)) {
-        if (!IsWindowVisible(s_device_hwnd) || devX != s_last_dev_x || devY != s_last_dev_y || devW != s_last_dev_w || devH != s_last_dev_h) {
-            s_last_dev_x = devX; s_last_dev_y = devY; s_last_dev_w = devW; s_last_dev_h = devH;
-            SetWindowPos(s_device_hwnd, HWND_TOP, devX, devY, devW, devH,
+    if (s_menu_hwnd && IsWindow(s_menu_hwnd)) {
+        if (!IsWindowVisible(s_menu_hwnd) || menuX != s_last_menu_x || menuY != s_last_menu_y || menuW != s_last_menu_w || menuH != s_last_menu_h) {
+            s_last_menu_x = menuX; s_last_menu_y = menuY; s_last_menu_w = menuW; s_last_menu_h = menuH;
+            SetWindowPos(s_menu_hwnd, HWND_TOP, menuX, menuY, menuW, menuH,
                          SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
     }
@@ -1214,13 +1145,17 @@ MainWndSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
                 SetWindowPos(s_cam_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                 InvalidateRect(s_cam_hwnd, NULL, FALSE);
             }
-            if (s_wifi_hwnd && IsWindow(s_wifi_hwnd)) {
-                SetWindowPos(s_wifi_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-                InvalidateRect(s_wifi_hwnd, NULL, FALSE);
+            if (s_menu_hwnd && IsWindow(s_menu_hwnd)) {
+                SetWindowPos(s_menu_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                InvalidateRect(s_menu_hwnd, NULL, FALSE);
             }
-            if (s_device_hwnd && IsWindow(s_device_hwnd)) {
-                SetWindowPos(s_device_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-                InvalidateRect(s_device_hwnd, NULL, FALSE);
+            break;
+        }
+        case WM_NCRBUTTONUP: {
+            if (wParam == HTCAPTION) {
+                POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+                show_flux_menu_at_point(pt.x, pt.y);
+                return 0;
             }
             break;
         }
@@ -1260,7 +1195,23 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
     // 1. Enable Windows 10/11 immersive dark mode on title bar
     BOOL darkMode = TRUE;
     DwmSetWindowAttribute(s_main_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
-    DwmSetWindowAttribute(s_main_hwnd, 19, &darkMode, sizeof(darkMode));
+    // 1b. Suppress native DWM title text and icon
+    typedef struct {
+        DWORD dwFlags;
+        DWORD dwMask;
+    } WTA_OPTIONS_LOCAL;
+    typedef HRESULT (WINAPI *PFN_SetWindowThemeAttribute)(HWND, DWORD, PVOID, DWORD);
+    HMODULE hUxTheme = LoadLibraryA("uxtheme.dll");
+    if (hUxTheme) {
+        PFN_SetWindowThemeAttribute pfn = (PFN_SetWindowThemeAttribute) GetProcAddress(hUxTheme, "SetWindowThemeAttribute");
+        if (pfn) {
+            WTA_OPTIONS_LOCAL opts;
+            opts.dwFlags = 0x00000001 /* WTNCA_NODRAWCAPTION */ | 0x00000002 /* WTNCA_NODRAWICON */;
+            opts.dwMask = 0x00000001 | 0x00000002;
+            pfn(s_main_hwnd, 1 /* WTA_NONCLIENT */, &opts, sizeof(opts));
+        }
+        FreeLibrary(hUxTheme);
+    }
 
     // 2. Remove Maximize button from Window Style & enforce HWND_TOPMOST
     LONG_PTR style = GetWindowLongPtr(s_main_hwnd, GWL_STYLE);
@@ -1277,9 +1228,9 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
 
     // 4. Set application icon
     HINSTANCE hInstance = GetModuleHandle(NULL);
-    HICON hIcon = (HICON) LoadImage(hInstance, MAKEINTRESOURCE(0), IMAGE_ICON, 16, 16, 0);
-    if (hIcon) {
-        SendMessage(s_main_hwnd, WM_SETICON, ICON_SMALL, (LPARAM) hIcon);
+    s_app_icon = (HICON) LoadImage(hInstance, MAKEINTRESOURCE(0), IMAGE_ICON, 16, 16, 0);
+    if (s_app_icon) {
+        SendMessage(s_main_hwnd, WM_SETICON, ICON_SMALL, (LPARAM) s_app_icon);
     }
     HICON hBigIcon = (HICON) LoadImage(hInstance, MAKEINTRESOURCE(0), IMAGE_ICON, 32, 32, 0);
     if (hBigIcon) {
@@ -1296,23 +1247,14 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
     wcCam.lpszClassName = "FluxCameraTitleBtn";
     RegisterClassEx(&wcCam);
 
-    WNDCLASSEX wcWifi;
-    memset(&wcWifi, 0, sizeof(wcWifi));
-    wcWifi.cbSize = sizeof(WNDCLASSEX);
-    wcWifi.lpfnWndProc = WifiBtnWndProc;
-    wcWifi.hInstance = hInstance;
-    wcWifi.hCursor = LoadCursor(NULL, IDC_HAND);
-    wcWifi.lpszClassName = "FluxWifiTitleBtn";
-    RegisterClassEx(&wcWifi);
-
-    WNDCLASSEX wcDev;
-    memset(&wcDev, 0, sizeof(wcDev));
-    wcDev.cbSize = sizeof(WNDCLASSEX);
-    wcDev.lpfnWndProc = DeviceDropdownBtnWndProc;
-    wcDev.hInstance = hInstance;
-    wcDev.hCursor = LoadCursor(NULL, IDC_HAND);
-    wcDev.lpszClassName = "FluxDeviceDropdownBtn";
-    RegisterClassEx(&wcDev);
+    WNDCLASSEX wcMenu;
+    memset(&wcMenu, 0, sizeof(wcMenu));
+    wcMenu.cbSize = sizeof(WNDCLASSEX);
+    wcMenu.lpfnWndProc = MenuBtnWndProc;
+    wcMenu.hInstance = hInstance;
+    wcMenu.hCursor = LoadCursor(NULL, IDC_HAND);
+    wcMenu.lpszClassName = "FluxBrandMenuBtn";
+    RegisterClassEx(&wcMenu);
 
     WNDCLASSEX wcToast;
     memset(&wcToast, 0, sizeof(wcToast));
@@ -1331,18 +1273,11 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
         -1000, -1000, 47, 29, s_main_hwnd, NULL, hInstance, NULL
     );
 
-    s_wifi_hwnd = CreateWindowEx(
+    s_menu_hwnd = CreateWindowEx(
         WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
-        "FluxWifiTitleBtn", "WifiBtn",
+        "FluxBrandMenuBtn", "BrandMenuBtn",
         WS_POPUP | WS_VISIBLE,
-        -1000, -1000, 32, 29, s_main_hwnd, NULL, hInstance, NULL
-    );
-
-    s_device_hwnd = CreateWindowEx(
-        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
-        "FluxDeviceDropdownBtn", "DeviceBtn",
-        WS_POPUP | WS_VISIBLE,
-        -1000, -1000, 96, 29, s_main_hwnd, NULL, hInstance, NULL
+        -1000, -1000, 114, 26, s_main_hwnd, NULL, hInstance, NULL
     );
 
     // 7. Tooltips
@@ -1364,14 +1299,9 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
         ti.lpszText = "Take Screenshot (Copy to Clipboard)";
         SendMessage(s_tooltip_hwnd, TTM_ADDTOOLA, 0, (LPARAM) &ti);
 
-        ti.hwnd = s_wifi_hwnd;
-        ti.uId = (UINT_PTR) s_wifi_hwnd;
-        ti.lpszText = "1-Click Wireless ADB Switcher (Port 5555)";
-        SendMessage(s_tooltip_hwnd, TTM_ADDTOOLA, 0, (LPARAM) &ti);
-
-        ti.hwnd = s_device_hwnd;
-        ti.uId = (UINT_PTR) s_device_hwnd;
-        ti.lpszText = "Switch Target Device";
+        ti.hwnd = s_menu_hwnd;
+        ti.uId = (UINT_PTR) s_menu_hwnd;
+        ti.lpszText = "FluxMirror Menu (Devices, Wireless ADB, Controls)";
         SendMessage(s_tooltip_hwnd, TTM_ADDTOOLA, 0, (LPARAM) &ti);
     }
 
@@ -1390,7 +1320,7 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
     SetTimer(s_cam_hwnd, SYNC_TIMER_ID, 33, NULL);
 
     reposition_controls();
-    LOGI("Native titlebar camera, wireless badge, and device dropdown initialized successfully");
+    LOGI("Native titlebar camera and brand menu initialized successfully");
 }
 
 void
@@ -1404,13 +1334,9 @@ sc_titlebar_camera_destroy(void) {
         DestroyWindow(s_cam_hwnd);
         s_cam_hwnd = NULL;
     }
-    if (s_wifi_hwnd && IsWindow(s_wifi_hwnd)) {
-        DestroyWindow(s_wifi_hwnd);
-        s_wifi_hwnd = NULL;
-    }
-    if (s_device_hwnd && IsWindow(s_device_hwnd)) {
-        DestroyWindow(s_device_hwnd);
-        s_device_hwnd = NULL;
+    if (s_menu_hwnd && IsWindow(s_menu_hwnd)) {
+        DestroyWindow(s_menu_hwnd);
+        s_menu_hwnd = NULL;
     }
     if (s_toast_hwnd && IsWindow(s_toast_hwnd)) {
         DestroyWindow(s_toast_hwnd);
