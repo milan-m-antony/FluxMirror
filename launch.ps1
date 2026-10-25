@@ -119,11 +119,11 @@ Write-Host "    - Middle Click: Home" -ForegroundColor DarkGray
 Write-Host "    - Alt + S: Recents / App Switcher" -ForegroundColor DarkGray
 Write-Host "    - Alt + R: Rotate Screen" -ForegroundColor DarkGray
 
-# Attach floating screenshot dock pill button
+# Attach Title Bar Camera Screenshot button & 'Copied to clipboard' toast
 $dockScript = "$previewerDir\tools\screenshot_dock.ps1"
 if (Test-Path $dockScript) {
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$dockScript`"" -WindowStyle Hidden
-    Write-Host "[+] Floating 'Copy Screenshot' dock attached on top!" -ForegroundColor Green
+    Write-Host "[+] Title Bar Camera Screenshot button & 'Copied to clipboard' toast attached!" -ForegroundColor Green
 }
 
 Write-Host ""

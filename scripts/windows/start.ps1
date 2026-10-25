@@ -128,11 +128,11 @@ if ($Wifi) {
 
 Start-Process -FilePath $nativeBin -WorkingDirectory $scrcpyDir -ArgumentList ($argsList -join " ")
 
-# 8. Attach floating screenshot companion dock
+# 8. Attach Title Bar Camera Screenshot button & 'Copied to clipboard' toast
 $dockScript = "$rootDir\tools\screenshot_dock.ps1"
 if (Test-Path $dockScript) {
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$dockScript`"" -WindowStyle Hidden
-    Write-Host "[+] Floating 'Copy Screenshot' dock attached on top!" -ForegroundColor Green
+    Write-Host "[+] Title Bar Camera Screenshot button & 'Copied to clipboard' toast attached!" -ForegroundColor Green
 }
 
 Write-Host "[+] Native mirror running. Press Ctrl+C or close the mirror window to exit." -ForegroundColor DarkGray

@@ -1,9 +1,11 @@
 <#
 .SYNOPSIS
-    FluxMirror Floating Screenshot Tool
+    FluxMirror Title Bar Camera Screenshot Button & Clipboard Toast
 .DESCRIPTION
-    Floating Always-on-Top "Copy Screenshot" pill button that docks directly above the FluxMirror window.
-    Captures full resolution phone screenshots directly to the Windows clipboard with a single click.
+    1. Sets title bar logo to black Flux icon.
+    2. Removes Maximize button (leaves only Minimize and Close).
+    3. Embeds a native camera screenshot icon directly in the title bar next to the minimize button.
+    4. When clicked: captures high-res screenshot to clipboard and displays "Copied to clipboard" toast.
 #>
 
 [CmdletBinding()]
@@ -16,6 +18,7 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+$rootDir = (Resolve-Path "$PSScriptRoot\..").Path
 $adb = "C:\Android\Sdk\platform-tools\adb.exe"
 if (-not (Test-Path $adb)) {
     $adb = (Get-Command adb -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue)
@@ -84,159 +87,347 @@ if ($Snap) {
     }
 }
 
+# --- WIN32 HELPER FOR WINDOW CUSTOMIZATION & CAPTION BUTTON EMBEDDING ---
 Add-Type @"
   using System;
   using System.Runtime.InteropServices;
+  using System.Text;
+
   public struct RECT {
     public int Left;
     public int Top;
     public int Right;
     public int Bottom;
   }
-  public class Win32Helper {
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+  public class Win32TitleBarHelper {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder strText, int maxCount);
+
+    [DllImport("user32.dll")]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder strClass, int maxCount);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern IntPtr LoadImage(IntPtr hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetSystemMenu(IntPtr hWnd, bool bRevert);
+
+    [DllImport("user32.dll")]
+    public static extern bool DeleteMenu(IntPtr hMenu, uint uPosition, uint uFlags);
+
+    public const int GWL_STYLE = -16;
+    public const int GWL_EXSTYLE = -20;
+    public const int WS_MAXIMIZEBOX = 0x00010000;
+    public const int WS_EX_NOACTIVATE = 0x08000000;
+    public const int WS_EX_TOOLWINDOW = 0x00000080;
+
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_FRAMECHANGED = 0x0020;
+    public const uint SWP_SHOWWINDOW = 0x0040;
+    public const uint SWP_HIDEWINDOW = 0x0080;
+
+    public const uint SC_MAXIMIZE = 0xF030;
+    public const uint MF_BYCOMMAND = 0x00000000;
+    public const uint WM_SETICON = 0x0080;
+    public const int ICON_SMALL = 0;
+    public const int ICON_BIG = 1;
+
+    // Finds the active FluxMirror / scrcpy window
+    public static IntPtr FindMirrorWindow() {
+      IntPtr found = IntPtr.Zero;
+      EnumWindows((hWnd, lParam) => {
+        if (IsWindowVisible(hWnd)) {
+          StringBuilder title = new StringBuilder(256);
+          GetWindowText(hWnd, title, 256);
+          StringBuilder cls = new StringBuilder(256);
+          GetClassName(hWnd, cls, 256);
+          string t = title.ToString();
+          string c = cls.ToString();
+          if (t.StartsWith("FluxMirror") || t.StartsWith("Flux Mirror") || t.StartsWith("Flux Mobile Screen") ||
+              (c == "SDL_app" && (t.Contains("Flux") || t.Length == 0 || t == "scrcpy"))) {
+            found = hWnd;
+            return false;
+          }
+        }
+        return true;
+      }, IntPtr.Zero);
+      return found;
+    }
+
+    // Removes Maximize button (keeps only Minimize and Close)
+    public static void DisableMaximize(IntPtr hWnd) {
+      if (hWnd == IntPtr.Zero) return;
+      int style = GetWindowLong(hWnd, GWL_STYLE);
+      style &= ~WS_MAXIMIZEBOX;
+      SetWindowLong(hWnd, GWL_STYLE, style);
+      SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+      IntPtr hMenu = GetSystemMenu(hWnd, false);
+      if (hMenu != IntPtr.Zero) {
+        DeleteMenu(hMenu, SC_MAXIMIZE, MF_BYCOMMAND);
+      }
+    }
+
+    // Sets window title bar icon to black icon
+    public static void SetBlackIcon(IntPtr hWnd, string iconPath) {
+      if (hWnd == IntPtr.Zero || string.IsNullOrEmpty(iconPath)) return;
+      try {
+        IntPtr hSmall = LoadImage(IntPtr.Zero, iconPath, 1, 16, 16, 0x0010);
+        if (hSmall != IntPtr.Zero) {
+          SendMessage(hWnd, WM_SETICON, (IntPtr)ICON_SMALL, hSmall);
+        }
+        IntPtr hBig = LoadImage(IntPtr.Zero, iconPath, 1, 32, 32, 0x0010);
+        if (hBig != IntPtr.Zero) {
+          SendMessage(hWnd, WM_SETICON, (IntPtr)ICON_BIG, hBig);
+        }
+      } catch {}
+    }
   }
 "@
 
-[xml]$xaml = @"
+# --- 1. TITLE BAR CAMERA ICON BUTTON WINDOW ---
+[xml]$xamlCam = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="FluxMirror Dock"
-        Height="36" Width="180"
+        Title="FluxCameraTitleBtn"
+        Height="28" Width="36"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
         Topmost="True"
         ShowInTaskbar="False"
-        ResizeMode="NoResize">
-    <Border Background="#F00F172A"
+        ResizeMode="NoResize"
+        Visibility="Hidden">
+    <Button Name="BtnCamera"
+            Background="Transparent"
+            BorderThickness="0"
+            Cursor="Hand"
+            ToolTip="Take Screenshot &amp; Copy to Clipboard"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch">
+        <Button.Template>
+            <ControlTemplate TargetType="Button">
+                <Border Name="bdr" Background="{TemplateBinding Background}" CornerRadius="4">
+                    <Viewbox Width="17" Height="15" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Canvas Width="24" Height="24">
+                            <!-- Clean Camera Outline (Matching User Mockup) -->
+                            <Path Data="M 4,7 L 7,7 L 8.8,4.4 C 9.1,4.1 9.5,4 10,4 L 14,4 C 14.5,4 14.9,4.1 15.2,4.4 L 17,7 L 20,7 C 21.1,7 22,7.9 22,9 L 22,18 C 22,19.1 21.1,20 20,20 L 4,20 C 2.9,20 2,19.1 2,18 L 2,9 C 2,7.9 2.9,7 4,7 Z"
+                                  Stroke="#FFFFFF"
+                                  StrokeThickness="1.6"
+                                  StrokeLineJoin="Round"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  Fill="Transparent"/>
+                            <!-- Inner Lens Circle -->
+                            <Ellipse Canvas.Left="8" Canvas.Top="9" Width="8" Height="8"
+                                     Stroke="#FFFFFF" StrokeThickness="1.6" Fill="Transparent"/>
+                            <!-- Flash Dot -->
+                            <Ellipse Canvas.Left="17" Canvas.Top="8.5" Width="1.6" Height="1.6"
+                                     Fill="#FFFFFF"/>
+                        </Canvas>
+                    </Viewbox>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="bdr" Property="Background" Value="#2BFFFFFF"/>
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                        <Setter TargetName="bdr" Property="Background" Value="#45FFFFFF"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Button.Template>
+    </Button>
+</Window>
+"@
+
+# --- 2. "COPIED TO CLIPBOARD" TOAST NOTIFICATION WINDOW ---
+[xml]$xamlToast = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FluxToast"
+        Height="42" Width="205"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        Visibility="Hidden">
+    <Border Background="#1E293B"
             BorderBrush="#FF6B00"
             BorderThickness="1.5"
-            CornerRadius="18"
-            Padding="3,2,3,2">
+            CornerRadius="21"
+            Padding="14,0"
+            Margin="2">
         <Border.Effect>
-            <DropShadowEffect BlurRadius="12" Color="#000000" Opacity="0.7" ShadowDepth="2"/>
+            <DropShadowEffect BlurRadius="12" Color="#000000" Opacity="0.6" ShadowDepth="3"/>
         </Border.Effect>
-        <Grid VerticalAlignment="Center">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="24"/>
-            </Grid.ColumnDefinitions>
-
-            <Button Name="BtnSnap" Grid.Column="0"
-                    Background="#FF6B00"
-                    Foreground="#FFFFFF"
-                    FontFamily="Segoe UI"
-                    FontSize="11.5"
-                    FontWeight="Bold"
-                    BorderThickness="0"
-                    Height="26"
-                    Margin="2,0,3,0"
-                    Cursor="Hand">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Border Name="bdr" Background="{TemplateBinding Background}" CornerRadius="13">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bdr" Property="Background" Value="#FF8533"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bdr" Property="Background" Value="#E05500"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Button.Template>
-                <TextBlock Name="TxtSnapLabel" Text="Copy Screenshot" VerticalAlignment="Center"/>
-            </Button>
-
-            <Button Name="BtnClose" Grid.Column="1"
-                    Background="Transparent"
-                    Foreground="#94A3B8"
-                    FontFamily="Segoe UI"
-                    FontSize="11"
-                    FontWeight="Bold"
-                    BorderThickness="0"
-                    Height="24"
-                    Width="22"
-                    Cursor="Hand">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Border Name="bdrClose" Background="{TemplateBinding Background}" CornerRadius="11">
-                            <TextBlock Text="X" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#94A3B8"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bdrClose" Property="Background" Value="#334155"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Button.Template>
-            </Button>
-        </Grid>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <!-- Emerald Checkmark Badge -->
+            <Border Width="18" Height="18" CornerRadius="9" Background="#10B981" Margin="0,0,8,0">
+                <TextBlock Text="✓" Foreground="#FFFFFF" FontWeight="Bold" FontSize="11"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0"/>
+            </Border>
+            <!-- Toast Text -->
+            <TextBlock Text="Copied to clipboard" Foreground="#FFFFFF"
+                       FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="12"
+                       VerticalAlignment="Center"/>
+        </StackPanel>
     </Border>
 </Window>
 "@
 
-$reader = (New-Object System.Xml.XmlNodeReader $xaml)
-$window = [System.Windows.Markup.XamlReader]::Load($reader)
+$winCam = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xamlCam))
+$winToast = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xamlToast))
 
-$btnSnap = $window.FindName("BtnSnap")
-$txtLabel = $window.FindName("TxtSnapLabel")
-$btnClose = $window.FindName("BtnClose")
+$btnCam = $winCam.FindName("BtnCamera")
 
-$window.Add_MouseLeftButtonDown({ $window.DragMove() })
-$btnClose.Add_Click({ $window.Close() })
+# Toast dismiss timer
+$toastDismissTimer = New-Object System.Windows.Threading.DispatcherTimer
+$toastDismissTimer.Interval = [TimeSpan]::FromSeconds(1.8)
+$toastDismissTimer.Add_Tick({
+    $winToast.Visibility = [System.Windows.Visibility]::Hidden
+    $toastDismissTimer.Stop()
+})
 
-$btnSnap.Add_Click({
-    $txtLabel.Text = "Capturing..."
-    $window.Dispatcher.Invoke([Action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
-
+# Click Event on Title Bar Camera Button: Snap Screenshot & Show Toast
+$btnCam.Add_Click({
     $ok = Copy-MobileScreenshotToClipboard
-
     if ($ok) {
-        $txtLabel.Text = "Copied!"
-        $btnSnap.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#10B981")
-        
-        $timer = New-Object System.Windows.Threading.DispatcherTimer
-        $timer.Interval = [TimeSpan]::FromSeconds(1.5)
-        $timer.Add_Tick({
-            $txtLabel.Text = "Copy Screenshot"
-            $btnSnap.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#FF6B00")
-            $timer.Stop()
-        })
-        $timer.Start()
-    } else {
-        $txtLabel.Text = "Failed"
-        Start-Sleep -Milliseconds 600
-        $txtLabel.Text = "Copy Screenshot"
-    }
-})
-
-$window.Add_Loaded({
-    $hwnd = [Win32Helper]::FindWindow($null, "Flux Mirror")
-    if ($hwnd -eq [IntPtr]::Zero) {
-        $hwnd = [Win32Helper]::FindWindow($null, "FluxMirror")
-    }
-    if ($hwnd -eq [IntPtr]::Zero) {
-        $hwnd = [Win32Helper]::FindWindow($null, "Flux Mobile Screen")
-    }
-
-    if ($hwnd -ne [IntPtr]::Zero) {
+        # Position toast centered horizontally over mirror window right below title bar
         $rect = New-Object RECT
-        if ([Win32Helper]::GetWindowRect($hwnd, [ref]$rect)) {
-            $window.Left = [Math]::Max(10, $rect.Left + 15)
-            $window.Top = [Math]::Max(10, $rect.Top - 40)
+        if ($targetHwnd -ne [IntPtr]::Zero -and [Win32TitleBarHelper]::GetWindowRect($targetHwnd, [ref]$rect)) {
+            $mirrorWidth = $rect.Right - $rect.Left
+            $winToast.Left = $rect.Left + (($mirrorWidth - $winToast.Width) / 2)
+            $winToast.Top = $rect.Top + 38
+        } else {
+            $winToast.Left = $winCam.Left - (($winToast.Width - $winCam.Width) / 2)
+            $winToast.Top = $winCam.Top + 36
         }
-    } else {
-        $window.Left = ([System.Windows.SystemParameters]::PrimaryScreenWidth - $window.Width) / 2
-        $window.Top = 30
+        $winToast.Visibility = [System.Windows.Visibility]::Visible
+        
+        $toastDismissTimer.Stop()
+        $toastDismissTimer.Start()
     }
 })
 
-$window.ShowDialog() | Out-Null
+# Make both windows non-activating so clicking doesn't unfocus scrcpy
+$winCam.Add_SourceInitialized({
+    $helper = New-Object System.Windows.Interop.WindowInteropHelper($winCam)
+    $h = $helper.Handle
+    $ex = [Win32TitleBarHelper]::GetWindowLong($h, [Win32TitleBarHelper]::GWL_EXSTYLE)
+    [Win32TitleBarHelper]::SetWindowLong($h, [Win32TitleBarHelper]::GWL_EXSTYLE, $ex -bor [Win32TitleBarHelper]::WS_EX_NOACTIVATE -bor [Win32TitleBarHelper]::WS_EX_TOOLWINDOW)
+})
+
+$winToast.Add_SourceInitialized({
+    $helper = New-Object System.Windows.Interop.WindowInteropHelper($winToast)
+    $h = $helper.Handle
+    $ex = [Win32TitleBarHelper]::GetWindowLong($h, [Win32TitleBarHelper]::GWL_EXSTYLE)
+    [Win32TitleBarHelper]::SetWindowLong($h, [Win32TitleBarHelper]::GWL_EXSTYLE, $ex -bor [Win32TitleBarHelper]::WS_EX_NOACTIVATE -bor [Win32TitleBarHelper]::WS_EX_TOOLWINDOW)
+})
+
+# --- SYNCHRONIZE CAMERA BUTTON IN TITLE BAR AT 60 FPS ---
+$targetHwnd = [IntPtr]::Zero
+$iconPath = "$rootDir\resources\icons\flux_black.ico"
+$isDecorated = $false
+$hasDiscoveredWindow = $false
+
+$syncTimer = New-Object System.Windows.Threading.DispatcherTimer
+$syncTimer.Interval = [TimeSpan]::FromMilliseconds(12) # ~80 FPS position sync
+$syncTimer.Add_Tick({
+    # 1. Search for window if not yet found
+    if ($targetHwnd -eq [IntPtr]::Zero -or -not [Win32TitleBarHelper]::IsWindow($targetHwnd)) {
+        $targetHwnd = [Win32TitleBarHelper]::FindMirrorWindow()
+        if ($targetHwnd -ne [IntPtr]::Zero) {
+            $hasDiscoveredWindow = $true
+            $isDecorated = $false
+        } else {
+            # Window not yet opened; if we previously discovered it, user closed it
+            if ($hasDiscoveredWindow) {
+                $winToast.Close()
+                $winCam.Close()
+            }
+            return
+        }
+    }
+
+    # 2. Check if mirror window is minimized
+    if ([Win32TitleBarHelper]::IsIconic($targetHwnd) -or -not [Win32TitleBarHelper]::IsWindowVisible($targetHwnd)) {
+        if ($winCam.Visibility -ne [System.Windows.Visibility]::Collapsed) {
+            $winCam.Visibility = [System.Windows.Visibility]::Collapsed
+            $winToast.Visibility = [System.Windows.Visibility]::Collapsed
+        }
+        return
+    }
+
+    # 3. Apply Title Bar Customizations once: Remove Maximize box & Set Black Logo
+    if (-not $isDecorated) {
+        [Win32TitleBarHelper]::DisableMaximize($targetHwnd)
+        if (Test-Path $iconPath) {
+            [Win32TitleBarHelper]::SetBlackIcon($targetHwnd, $iconPath)
+        }
+        $isDecorated = $true
+    }
+
+    # 4. Position Camera Button Directly Inside the Title Bar (Left of Minimize Button)
+    $rect = New-Object RECT
+    if ([Win32TitleBarHelper]::GetWindowRect($targetHwnd, [ref]$rect)) {
+        # In Windows 11 title bars, Minimize button is positioned ~140px from the right edge.
+        # We anchor the camera button directly to the left of the minimize button.
+        $newLeft = $rect.Right - 178
+        $newTop = $rect.Top + 2
+
+        if ([Math]::Abs($winCam.Left - $newLeft) -gt 0.5 -or [Math]::Abs($winCam.Top - $newTop) -gt 0.5) {
+            $winCam.Left = $newLeft
+            $winCam.Top = $newTop
+        }
+
+        # Reveal camera button once positioned
+        if ($winCam.Visibility -ne [System.Windows.Visibility]::Visible) {
+            $winCam.Visibility = [System.Windows.Visibility]::Visible
+        }
+    }
+})
+
+$winCam.Add_Loaded({
+    $syncTimer.Start()
+})
+
+$winCam.ShowDialog() | Out-Null
