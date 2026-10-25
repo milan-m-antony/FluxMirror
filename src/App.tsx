@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Camera,
   ChevronLeft,
@@ -6,7 +7,8 @@ import {
   Square,
   CheckCircle2,
   RotateCw,
-  Power
+  Pin,
+  PinOff
 } from 'lucide-react';
 
 export function App() {
@@ -17,6 +19,8 @@ export function App() {
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLandscape, setIsLandscape] = useState<boolean>(false);
+  const [isPinned, setIsPinned] = useState<boolean>(false);
+  const [pipWindow, setPipWindow] = useState<Window | null>(null);
 
   const imgRef = useRef<HTMLImageElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -28,7 +32,7 @@ export function App() {
     setTimeout(() => setToastMessage(null), 2000);
   };
 
-  // Fetch device information
+  // Fetch device info
   const checkDevice = useCallback(async () => {
     try {
       const res = await fetch('/api/device-info');
@@ -51,41 +55,46 @@ export function App() {
     return () => clearInterval(interval);
   }, [checkDevice]);
 
-  // Frame streaming loop with object URL recycling
+  // Pull fresh frame
+  const pullFrame = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    try {
+      const res = await fetch(`/api/frame?t=${Date.now()}`);
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob.size > 1000) {
+          const newUrl = URL.createObjectURL(blob);
+          setFrameUrl(newUrl);
+
+          if (currentBlobUrlRef.current && currentBlobUrlRef.current !== '/api/frame') {
+            URL.revokeObjectURL(currentBlobUrlRef.current);
+          }
+          currentBlobUrlRef.current = newUrl;
+          setIsConnected(true);
+        }
+      }
+    } catch {
+      // Retry
+    } finally {
+      isFetchingRef.current = false;
+    }
+  }, []);
+
+  // Frame streaming interval
   useEffect(() => {
     let isCancelled = false;
 
-    const pullNextFrame = async () => {
-      if (isCancelled || isFetchingRef.current) return;
-      isFetchingRef.current = true;
-
-      try {
-        const res = await fetch(`/api/frame?t=${Date.now()}`);
-        if (res.ok && !isCancelled) {
-          const blob = await res.blob();
-          if (blob.size > 1000) {
-            const newUrl = URL.createObjectURL(blob);
-            setFrameUrl(newUrl);
-
-            // Clean up previous blob URL to prevent memory accumulation
-            if (currentBlobUrlRef.current && currentBlobUrlRef.current !== '/api/frame') {
-              URL.revokeObjectURL(currentBlobUrlRef.current);
-            }
-            currentBlobUrlRef.current = newUrl;
-            setIsConnected(true);
-          }
-        }
-      } catch {
-        // Stream retry
-      } finally {
-        isFetchingRef.current = false;
-        if (!isCancelled) {
-          setTimeout(pullNextFrame, 120);
-        }
+    const streamLoop = async () => {
+      if (isCancelled) return;
+      await pullFrame();
+      if (!isCancelled) {
+        setTimeout(streamLoop, 150);
       }
     };
 
-    pullNextFrame();
+    streamLoop();
 
     return () => {
       isCancelled = true;
@@ -93,9 +102,9 @@ export function App() {
         URL.revokeObjectURL(currentBlobUrlRef.current);
       }
     };
-  }, []);
+  }, [pullFrame]);
 
-  // Send action to phone
+  // Send action to phone & trigger immediate visual refresh
   const sendAction = async (payload: any) => {
     try {
       await fetch('/api/action', {
@@ -103,6 +112,10 @@ export function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...payload, device: deviceSerial }),
       });
+
+      // Rapidly pull updated frames to reflect gesture change immediately
+      setTimeout(pullFrame, 180);
+      setTimeout(pullFrame, 500);
     } catch (err) {
       console.error('Action failed', err);
     }
@@ -213,105 +226,168 @@ export function App() {
     showToast(next ? 'Landscape Mode' : 'Portrait Mode');
   };
 
-  // Power / Lock Screen
-  const handlePowerLock = () => {
-    sendAction({ type: 'key', code: 26 });
-    showToast('Power / Lock Screen');
+  // Always-On-Top Pin Toggle (via Document Picture-in-Picture)
+  const handleTogglePin = async () => {
+    if (pipWindow) {
+      pipWindow.close();
+      setPipWindow(null);
+      setIsPinned(false);
+      return;
+    }
+
+    if ('documentPictureInPicture' in window) {
+      try {
+        const pip = await (window as any).documentPictureInPicture.requestWindow({
+          width: 380,
+          height: 820,
+        });
+
+        // Copy styles into PiP window
+        [...document.styleSheets].forEach((sheet) => {
+          try {
+            const rules = [...sheet.cssRules].map((r) => r.cssText).join('');
+            const style = document.createElement('style');
+            style.textContent = rules;
+            pip.document.head.appendChild(style);
+          } catch {
+            if (sheet.href) {
+              const link = document.createElement('link');
+              link.rel = 'stylesheet';
+              link.href = sheet.href;
+              pip.document.head.appendChild(link);
+            }
+          }
+        });
+
+        pip.document.body.style.margin = '0';
+        pip.document.body.style.padding = '0';
+        pip.document.body.style.background = '#000';
+        pip.document.body.style.overflow = 'hidden';
+
+        pip.addEventListener('pagehide', () => {
+          setPipWindow(null);
+          setIsPinned(false);
+        });
+
+        setPipWindow(pip);
+        setIsPinned(true);
+        showToast('Pinned on top of Antigravity!');
+      } catch (err) {
+        console.error('PiP error', err);
+        showToast('PiP not available');
+      }
+    } else {
+      showToast('Always-on-top requires Chrome or Edge');
+    }
   };
 
-  const activeAspectRatio = isLandscape ? 19.5 / 9 : 9 / 19.5;
-
-  return (
-    <div className="mirror-app">
-      {/* Centered Phone Chassis with Responsive Fixed Aspect Ratio */}
-      <div className="phone-container" style={{ aspectRatio: activeAspectRatio }}>
-        {/* Top Floating Control Bar */}
-        <div className="mirror-topbar">
-          <div className="device-status">
-            <span
-              className="status-dot"
-              style={{ background: isConnected ? '#10b981' : '#ef4444' }}
-            />
-            <span className="device-name">{deviceModel}</span>
-          </div>
-
-          <div className="topbar-actions">
-            <button
-              className={`btn-screenshot ${isCopied ? 'copied' : ''}`}
-              onClick={handleCopyScreenshot}
-              title="Copy screenshot directly to clipboard (Ctrl + V)"
-            >
-              <Camera size={14} />
-              <span>{isCopied ? 'Copied!' : 'Copy Screenshot'}</span>
-            </button>
-
-            <button
-              className="btn-icon"
-              onClick={handleToggleRotate}
-              title="Rotate Screen"
-            >
-              <RotateCw size={13} />
-            </button>
-
-            <button
-              className="btn-icon"
-              onClick={handlePowerLock}
-              title="Power / Lock"
-            >
-              <Power size={13} color="#ef4444" />
-            </button>
-          </div>
-        </div>
-
-        {/* Live Phone Display Viewport */}
-        <div className="phone-viewport">
-          <img
-            ref={imgRef}
-            src={frameUrl}
-            alt="Android Device Screen"
-            className="phone-display-img"
-            onPointerDown={handlePointerDown}
-            onPointerUp={handlePointerUp}
-            onWheel={handleWheel}
-            draggable={false}
+  // Pure Phone Screen Content (Zero Outer Box)
+  const phoneContent = (
+    <div className="mirror-window">
+      {/* Top Floating Control Bar */}
+      <div className="mirror-topbar">
+        <div className="device-status">
+          <span
+            className="status-dot"
+            style={{ background: isConnected ? '#10b981' : '#ef4444' }}
           />
+          <span className="device-name">{deviceModel}</span>
         </div>
 
-        {/* Android Bottom Navigation Dock */}
-        <div className="mirror-nav">
+        <div className="topbar-actions">
           <button
-            className="nav-btn"
-            onClick={() => sendAction({ type: 'key', code: 4 })}
-            title="Back"
+            className={`btn-screenshot ${isCopied ? 'copied' : ''}`}
+            onClick={handleCopyScreenshot}
+            title="Copy screenshot directly to clipboard (Ctrl + V)"
           >
-            <ChevronLeft size={22} />
+            <Camera size={13} />
+            <span>{isCopied ? 'Copied!' : 'Copy Screenshot'}</span>
           </button>
+
           <button
-            className="nav-btn"
-            onClick={() => sendAction({ type: 'key', code: 3 })}
-            title="Home"
+            className="btn-icon"
+            onClick={handleToggleRotate}
+            title="Rotate Screen"
           >
-            <Circle size={15} />
+            <RotateCw size={13} />
           </button>
+
+          {/* Always-on-Top Pin Button */}
           <button
-            className="nav-btn"
-            onClick={() => sendAction({ type: 'key', code: 187 })}
-            title="Recents"
+            className={`btn-icon ${isPinned ? 'pinned' : ''}`}
+            onClick={handleTogglePin}
+            title={isPinned ? 'Unpin Screen' : 'Pin Always-On-Top over Antigravity'}
           >
-            <Square size={14} />
+            {isPinned ? <PinOff size={13} color="#ff6b00" /> : <Pin size={13} />}
           </button>
         </div>
-
-        {/* Toast */}
-        {toastMessage && (
-          <div className="mirror-toast">
-            <CheckCircle2 size={16} color="#10b981" />
-            <span>{toastMessage}</span>
-          </div>
-        )}
       </div>
+
+      {/* Screen Mirror Viewport (100% Responsive) */}
+      <div className="mirror-viewport">
+        <img
+          ref={imgRef}
+          src={frameUrl}
+          alt="Android Screen"
+          className="mirror-img"
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onWheel={handleWheel}
+          draggable={false}
+        />
+      </div>
+
+      {/* Android Bottom Navigation Bar */}
+      <div className="mirror-nav">
+        <button
+          className="nav-btn"
+          onClick={() => sendAction({ type: 'key', code: 4 })}
+          title="Back"
+        >
+          <ChevronLeft size={22} />
+        </button>
+        <button
+          className="nav-btn"
+          onClick={() => sendAction({ type: 'key', code: 3 })}
+          title="Home"
+        >
+          <Circle size={15} />
+        </button>
+        <button
+          className="nav-btn"
+          onClick={() => sendAction({ type: 'key', code: 187 })}
+          title="Recents"
+        >
+          <Square size={14} />
+        </button>
+      </div>
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="mirror-toast">
+          <CheckCircle2 size={15} color="#10b981" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
+
+  if (pipWindow) {
+    return (
+      <div className="mirror-pinned-msg">
+        {createPortal(phoneContent, pipWindow.document.body)}
+        <div className="pinned-placeholder">
+          <Pin size={32} color="#ff6b00" />
+          <span>Screen Pinned Always-On-Top!</span>
+          <button className="btn-unpin" onClick={handleTogglePin}>
+            Unpin Back to Window
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return phoneContent;
 }
 
 export default App;

@@ -131,40 +131,44 @@ export function adbBridgePlugin(): Plugin {
         }
       });
 
-      // 3. Screen Frame Capture (Instant Cached Buffer & Continuous Pipeline)
-      let cachedFrame: Buffer | null = null;
-      let currentPromise: Promise<Buffer | null> | null = null;
+      // 3. Continuous Background Frame Capture Engine
+      let latestFrame: Buffer | null = null;
+      let isWorkerRunning = false;
 
-      const triggerCapture = (device: string): Promise<Buffer | null> => {
-        if (currentPromise) return currentPromise;
-
-        currentPromise = new Promise<Buffer | null>((resolve) => {
+      const grabOneScreencap = (device: string): Promise<Buffer | null> => {
+        return new Promise<Buffer | null>((resolve) => {
           const proc = spawn(adbPath, ['-s', device, 'exec-out', 'screencap', '-p']);
           const chunks: Buffer[] = [];
           proc.stdout.on('data', chunk => chunks.push(chunk));
           proc.stderr.on('data', () => {});
           proc.on('close', (code) => {
-            currentPromise = null;
-            if (code === 0 && chunks.length > 0) {
-              cachedFrame = Buffer.concat(chunks);
-              resolve(cachedFrame);
+            if (code === 0 && chunks.length > 1000) {
+              latestFrame = Buffer.concat(chunks);
+              resolve(latestFrame);
             } else {
-              resolve(cachedFrame);
+              resolve(latestFrame);
             }
           });
-          proc.on('error', () => {
-            currentPromise = null;
-            resolve(cachedFrame);
-          });
+          proc.on('error', () => resolve(latestFrame));
         });
-
-        return currentPromise;
       };
 
-      // Pre-warm initial frame on server startup
-      const initialDev = resolveTargetDevice();
-      if (initialDev) {
-        triggerCapture(initialDev);
+      const startCaptureWorker = async (device: string) => {
+        if (isWorkerRunning) return;
+        isWorkerRunning = true;
+        while (isWorkerRunning) {
+          try {
+            await grabOneScreencap(device);
+          } catch {
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }
+      };
+
+      // Start initial background capture
+      const initDev = resolveTargetDevice();
+      if (initDev) {
+        startCaptureWorker(initDev);
       }
 
       server.middlewares.use('/api/frame', async (req, res) => {
@@ -177,32 +181,30 @@ export function adbBridgePlugin(): Plugin {
           return res.end('No device connected');
         }
 
-        // Return cached frame immediately for instant response (< 5ms)
-        if (cachedFrame && cachedFrame.length > 0) {
-          res.setHeader('Content-Type', 'image/png');
-          res.setHeader('Content-Length', cachedFrame.length);
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          res.end(cachedFrame);
+        // Ensure capture loop is active
+        startCaptureWorker(device);
 
-          // Trigger background capture to keep frame fresh
-          triggerCapture(device);
-          return;
+        if (latestFrame && latestFrame.length > 0) {
+          res.setHeader('Content-Type', 'image/png');
+          res.setHeader('Content-Length', latestFrame.length);
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.end(latestFrame);
         }
 
-        // First frame: await capture
-        const frame = await triggerCapture(device);
-        if (frame && frame.length > 0) {
+        // If initial frame is not yet ready, wait for first grab
+        const initial = await grabOneScreencap(device);
+        if (initial && initial.length > 0) {
           res.setHeader('Content-Type', 'image/png');
-          res.setHeader('Content-Length', frame.length);
+          res.setHeader('Content-Length', initial.length);
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          return res.end(frame);
+          return res.end(initial);
         } else {
-          res.statusCode = 500;
-          return res.end('Failed to capture frame');
+          res.statusCode = 503;
+          return res.end('Display initializing...');
         }
       });
 
-      // 4. Action Dispatcher (Tap, Swipe, Keyevent, Text Typing, Rotate, Power)
+      // 4. Action Dispatcher (Tap, Swipe, Keyevent, Rotate)
       server.middlewares.use('/api/action', (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405;
@@ -230,15 +232,14 @@ export function adbBridgePlugin(): Plugin {
               cmd = `"${adbPath}" -s ${device} shell input keyevent ${data.code}`;
             } else if (data.type === 'rotate') {
               cmd = `"${adbPath}" -s ${device} shell "settings put system accelerometer_rotation 1"`;
-            } else if (data.type === 'text' && data.text) {
-              const escaped = data.text.replace(/([ "$\\])/g, '\\$1');
-              cmd = `"${adbPath}" -s ${device} shell input text "${escaped}"`;
             }
 
             if (cmd) {
               execSync(cmd);
-              // Trigger fresh frame capture after action
-              setTimeout(() => triggerCapture(device), 150);
+              // Trigger immediate screencap after gesture
+              setTimeout(() => {
+                grabOneScreencap(device);
+              }, 120);
             }
 
             res.setHeader('Content-Type', 'application/json');
