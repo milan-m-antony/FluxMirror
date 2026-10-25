@@ -37,10 +37,14 @@
 
 ## 🚀 1-Click Launchers
 
-### Windows (Command Prompt)
+### Windows (Dedicated CMD Outside IDE)
+Double-click or run from terminal:
 ```cmd
 start.bat
 ```
+* Automatically spawns a **dedicated external Command Prompt window outside the IDE** on your desktop showing real-time streaming FPS and logs.
+* To open a dedicated standalone Command Prompt in the project folder anytime: `terminal.bat`.
+* To run inline in the current terminal: `start.bat --inline`.
 
 ### macOS & Linux (Terminal)
 ```bash
@@ -61,7 +65,8 @@ chmod +x start.sh
 
 ```
 previewer/
-├── start.bat                   # Windows Command Prompt launcher
+├── start.bat                   # Dedicated external CMD launcher
+├── terminal.bat                # 1-click standalone external terminal
 ├── start.sh                    # macOS & Linux Bash launcher
 ├── build.bat                   # Windows build script
 ├── meson.build                 # Root Meson build configuration

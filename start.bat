@@ -34,7 +34,7 @@ if not defined TARGET_SERIAL (
 
 echo [+] Target device: !TARGET_SERIAL!
 
-:: 3. Launch native compiled FluxMirror
+:: 3. Resolve compiled FluxMirror executable
 set "FLUX_BIN=%~dp0bin\FluxMirror.exe"
 if not exist "!FLUX_BIN!" (
     set "FLUX_BIN=%~dp0bin\scrcpy.exe"
@@ -42,11 +42,19 @@ if not exist "!FLUX_BIN!" (
 
 if not exist "!FLUX_BIN!" (
     echo [x] Error: Compiled FluxMirror binary not found.
-    echo     Please build using ninja in build-win64.
+    echo     Please build using build.bat first.
     exit /b 1
 )
 
-echo [+] Launching FluxMirror native window...
-"!FLUX_BIN!" -s !TARGET_SERIAL! --window-title "FluxMirror" --always-on-top --max-fps 120 --video-buffer 0 --video-codec h264 --video-bit-rate 16M --stay-awake --print-fps %*
+:: 4. Launch in dedicated external CMD window outside the IDE
+if "%~1"=="--inline" (
+    shift
+    echo [+] Launching FluxMirror inline...
+    "!FLUX_BIN!" -s !TARGET_SERIAL! --window-title "FluxMirror" --always-on-top --max-fps 120 --video-buffer 0 --video-codec h264 --video-bit-rate 16M --stay-awake --print-fps %*
+) else (
+    echo [+] Spawning dedicated external Command Prompt window outside IDE...
+    start "FluxMirror Engine" cmd.exe /c ""!FLUX_BIN!" -s !TARGET_SERIAL! --window-title "FluxMirror" --always-on-top --max-fps 120 --video-buffer 0 --video-codec h264 --video-bit-rate 16M --stay-awake --print-fps %* || pause"
+    echo [+] FluxMirror running in dedicated window outside IDE.
+)
 
 endlocal
