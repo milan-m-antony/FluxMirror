@@ -1,5 +1,6 @@
 # Build outputs
 build/
+build-win64/
 out/
 bin/
 *.exe

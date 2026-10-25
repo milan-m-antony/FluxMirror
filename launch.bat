@@ -1,4 +1,5 @@
 @echo off
 setlocal
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch.ps1" %*
+cd /d "%~dp0"
+call "%~dp0start.bat" %*
 endlocal
