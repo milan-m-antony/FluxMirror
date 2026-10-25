@@ -222,6 +222,7 @@ Add-Type @"
 "@
 
 # --- 1. TITLE BAR CAMERA ICON BUTTON WINDOW ---
+# Starts off-screen (Left="-10000") to avoid flicker until snapped to title bar
 [xml]$xamlCam = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -233,7 +234,7 @@ Add-Type @"
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
-        Visibility="Hidden">
+        Left="-10000" Top="-10000">
     <Button Name="BtnCamera"
             Background="Transparent"
             BorderThickness="0"
@@ -289,7 +290,7 @@ Add-Type @"
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
-        Visibility="Hidden">
+        Left="-10000" Top="-10000">
     <Border Background="#1E293B"
             BorderBrush="#FF6B00"
             BorderThickness="1.5"
@@ -323,29 +324,8 @@ $btnCam = $winCam.FindName("BtnCamera")
 $toastDismissTimer = New-Object System.Windows.Threading.DispatcherTimer
 $toastDismissTimer.Interval = [TimeSpan]::FromSeconds(1.8)
 $toastDismissTimer.Add_Tick({
-    $winToast.Visibility = [System.Windows.Visibility]::Hidden
+    $winToast.Left = -10000
     $toastDismissTimer.Stop()
-})
-
-# Click Event on Title Bar Camera Button: Snap Screenshot & Show Toast
-$btnCam.Add_Click({
-    $ok = Copy-MobileScreenshotToClipboard
-    if ($ok) {
-        # Position toast centered horizontally over mirror window right below title bar
-        $rect = New-Object RECT
-        if ($targetHwnd -ne [IntPtr]::Zero -and [Win32TitleBarHelper]::GetWindowRect($targetHwnd, [ref]$rect)) {
-            $mirrorWidth = $rect.Right - $rect.Left
-            $winToast.Left = $rect.Left + (($mirrorWidth - $winToast.Width) / 2)
-            $winToast.Top = $rect.Top + 38
-        } else {
-            $winToast.Left = $winCam.Left - (($winToast.Width - $winCam.Width) / 2)
-            $winToast.Top = $winCam.Top + 36
-        }
-        $winToast.Visibility = [System.Windows.Visibility]::Visible
-        
-        $toastDismissTimer.Stop()
-        $toastDismissTimer.Start()
-    }
 })
 
 # Make both windows non-activating so clicking doesn't unfocus scrcpy
@@ -363,11 +343,31 @@ $winToast.Add_SourceInitialized({
     [Win32TitleBarHelper]::SetWindowLong($h, [Win32TitleBarHelper]::GWL_EXSTYLE, $ex -bor [Win32TitleBarHelper]::WS_EX_NOACTIVATE -bor [Win32TitleBarHelper]::WS_EX_TOOLWINDOW)
 })
 
+# Click Event on Title Bar Camera Button: Snap Screenshot & Show Toast
+$btnCam.Add_Click({
+    $ok = Copy-MobileScreenshotToClipboard
+    if ($ok) {
+        $rect = New-Object RECT
+        if ($targetHwnd -ne [IntPtr]::Zero -and [Win32TitleBarHelper]::GetWindowRect($targetHwnd, [ref]$rect)) {
+            $mirrorWidth = $rect.Right - $rect.Left
+            $winToast.Left = $rect.Left + (($mirrorWidth - $winToast.Width) / 2)
+            $winToast.Top = $rect.Top + 38
+        } else {
+            $winToast.Left = $winCam.Left - (($winToast.Width - $winCam.Width) / 2)
+            $winToast.Top = $winCam.Top + 36
+        }
+        
+        $toastDismissTimer.Stop()
+        $toastDismissTimer.Start()
+    }
+})
+
 # --- SYNCHRONIZE CAMERA BUTTON IN TITLE BAR AT 60 FPS ---
 $targetHwnd = [IntPtr]::Zero
 $iconPath = "$rootDir\resources\icons\flux_black.ico"
 $isDecorated = $false
 $hasDiscoveredWindow = $false
+$missedCount = 0
 
 $syncTimer = New-Object System.Windows.Threading.DispatcherTimer
 $syncTimer.Interval = [TimeSpan]::FromMilliseconds(12) # ~80 FPS position sync
@@ -378,11 +378,14 @@ $syncTimer.Add_Tick({
         if ($targetHwnd -ne [IntPtr]::Zero) {
             $hasDiscoveredWindow = $true
             $isDecorated = $false
+            $missedCount = 0
         } else {
-            # Window not yet opened; if we previously discovered it, user closed it
             if ($hasDiscoveredWindow) {
-                $winToast.Close()
-                $winCam.Close()
+                $missedCount++
+                if ($missedCount -gt 25) { # Close only if window was really closed for > 300ms
+                    $winToast.Close()
+                    $winCam.Close()
+                }
             }
             return
         }
@@ -390,9 +393,9 @@ $syncTimer.Add_Tick({
 
     # 2. Check if mirror window is minimized
     if ([Win32TitleBarHelper]::IsIconic($targetHwnd) -or -not [Win32TitleBarHelper]::IsWindowVisible($targetHwnd)) {
-        if ($winCam.Visibility -ne [System.Windows.Visibility]::Collapsed) {
-            $winCam.Visibility = [System.Windows.Visibility]::Collapsed
-            $winToast.Visibility = [System.Windows.Visibility]::Collapsed
+        if ($winCam.Left -gt -5000) {
+            $winCam.Left = -10000
+            $winToast.Left = -10000
         }
         return
     }
@@ -409,25 +412,20 @@ $syncTimer.Add_Tick({
     # 4. Position Camera Button Directly Inside the Title Bar (Left of Minimize Button)
     $rect = New-Object RECT
     if ([Win32TitleBarHelper]::GetWindowRect($targetHwnd, [ref]$rect)) {
-        # In Windows 11 title bars, Minimize button is positioned ~140px from the right edge.
-        # We anchor the camera button directly to the left of the minimize button.
-        $newLeft = $rect.Right - 178
+        # Anchor camera button directly to the left of the minimize button
+        $newLeft = $rect.Right - 176
         $newTop = $rect.Top + 2
 
         if ([Math]::Abs($winCam.Left - $newLeft) -gt 0.5 -or [Math]::Abs($winCam.Top - $newTop) -gt 0.5) {
             $winCam.Left = $newLeft
             $winCam.Top = $newTop
         }
-
-        # Reveal camera button once positioned
-        if ($winCam.Visibility -ne [System.Windows.Visibility]::Visible) {
-            $winCam.Visibility = [System.Windows.Visibility]::Visible
-        }
     }
 })
 
 $winCam.Add_Loaded({
     $syncTimer.Start()
+    $winToast.Show()
 })
 
 $winCam.ShowDialog() | Out-Null
