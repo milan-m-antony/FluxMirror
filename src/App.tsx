@@ -6,33 +6,40 @@ import {
   Square,
   CheckCircle2,
   RotateCw,
-  Power
+  Power,
+  Smartphone
 } from 'lucide-react';
 
 export function App() {
-  const [device, setDevice] = useState<string>('');
   const [deviceModel, setDeviceModel] = useState<string>('Connecting...');
+  const [deviceSerial, setDeviceSerial] = useState<string>('');
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [frameUrl, setFrameUrl] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [aspectRatio, setAspectRatio] = useState<number>(9 / 19.5);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const isFetchingRef = useRef<boolean>(false);
+  const currentBlobUrlRef = useRef<string | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2000);
   };
 
-  // Check device status
+  // Fetch device information & resolution
   const checkDevice = useCallback(async () => {
     try {
       const res = await fetch('/api/device-info');
       if (res.ok) {
         const data = await res.json();
-        setDevice(data.device);
+        setDeviceSerial(data.device || '');
         setDeviceModel(data.model || 'Android Device');
+        if (data.width && data.height) {
+          setAspectRatio(data.width / data.height);
+        }
         setIsConnected(true);
       } else {
         setIsConnected(false);
@@ -50,7 +57,7 @@ export function App() {
     return () => clearInterval(interval);
   }, [checkDevice]);
 
-  // Frame streaming loop
+  // Frame streaming loop with object URL recycling
   useEffect(() => {
     let isCancelled = false;
 
@@ -60,29 +67,26 @@ export function App() {
 
       try {
         const res = await fetch(`/api/frame?t=${Date.now()}`);
-        if (res.ok) {
+        if (res.ok && !isCancelled) {
           const blob = await res.blob();
-          const imgBitmap = await createImageBitmap(blob);
+          if (blob.size > 1000) {
+            const newUrl = URL.createObjectURL(blob);
+            setFrameUrl(newUrl);
 
-          if (canvasRef.current && !isCancelled) {
-            const canvas = canvasRef.current;
-            if (canvas.width !== imgBitmap.width || canvas.height !== imgBitmap.height) {
-              canvas.width = imgBitmap.width;
-              canvas.height = imgBitmap.height;
+            // Clean up previous blob URL to avoid memory leak
+            if (currentBlobUrlRef.current) {
+              URL.revokeObjectURL(currentBlobUrlRef.current);
             }
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(imgBitmap, 0, 0);
-            }
+            currentBlobUrlRef.current = newUrl;
+            setIsConnected(true);
           }
-          setIsConnected(true);
         }
       } catch {
-        // retry
+        // Stream retry
       } finally {
         isFetchingRef.current = false;
         if (!isCancelled) {
-          setTimeout(pullNextFrame, 75);
+          setTimeout(pullNextFrame, 100);
         }
       }
     };
@@ -91,6 +95,9 @@ export function App() {
 
     return () => {
       isCancelled = true;
+      if (currentBlobUrlRef.current) {
+        URL.revokeObjectURL(currentBlobUrlRef.current);
+      }
     };
   }, []);
 
@@ -100,32 +107,37 @@ export function App() {
       await fetch('/api/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, device }),
+        body: JSON.stringify({ ...payload, device: deviceSerial }),
       });
     } catch (err) {
       console.error('Action failed', err);
     }
   };
 
-  // Convert canvas pointer coordinates to device coordinates
-  const getDeviceCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+  // Convert image pointer coordinates to phone native coordinates
+  const getDeviceCoords = (e: React.PointerEvent<HTMLImageElement>) => {
+    const img = imgRef.current;
+    if (!img) return { x: 0, y: 0 };
+    const rect = img.getBoundingClientRect();
+    const naturalWidth = img.naturalWidth || 1080;
+    const naturalHeight = img.naturalHeight || 2340;
+
+    const scaleX = naturalWidth / rect.width;
+    const scaleY = naturalHeight / rect.height;
 
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
     return { x, y };
   };
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLImageElement>) => {
+    e.preventDefault();
     const coords = getDeviceCoords(e);
     pointerStartRef.current = { x: coords.x, y: coords.y, time: performance.now() };
   };
 
-  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLImageElement>) => {
+    e.preventDefault();
     if (!pointerStartRef.current) return;
     const endCoords = getDeviceCoords(e);
     const startCoords = pointerStartRef.current;
@@ -152,12 +164,12 @@ export function App() {
     pointerStartRef.current = null;
   };
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+  const handleWheel = (e: React.WheelEvent<HTMLImageElement>) => {
     e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const midX = canvas.width / 2;
-    const midY = canvas.height / 2;
+    const img = imgRef.current;
+    if (!img) return;
+    const midX = (img.naturalWidth || 1080) / 2;
+    const midY = (img.naturalHeight || 2340) / 2;
     const scrollDelta = e.deltaY > 0 ? -450 : 450;
 
     sendAction({
@@ -172,11 +184,18 @@ export function App() {
 
   // Instant in-memory screenshot copy to clipboard
   const handleCopyScreenshot = async () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const img = imgRef.current;
+    if (!img) return;
 
     try {
-      canvas.toBlob(async (blob) => {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = img.naturalWidth || 1080;
+      offscreen.height = img.naturalHeight || 2340;
+      const ctx = offscreen.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+
+      offscreen.toBlob(async (blob) => {
         if (!blob) return;
         try {
           await navigator.clipboard.write([
@@ -186,7 +205,7 @@ export function App() {
           showToast('Copied to Clipboard!');
           setTimeout(() => setIsCopied(false), 1800);
         } catch {
-          showToast('Clipboard blocked');
+          showToast('Clipboard permission blocked');
         }
       }, 'image/png');
     } catch {
@@ -195,88 +214,101 @@ export function App() {
   };
 
   return (
-    <div className="mirror-window">
-      {/* Top Floating Control Bar */}
-      <div className="mirror-topbar">
-        <div className="device-status">
-          <span className="status-dot" style={{ background: isConnected ? '#10b981' : '#ef4444' }} />
-          <span className="device-name">{deviceModel}</span>
+    <div className="mirror-app">
+      {/* Centered Phone Chassis with Exact Responsive Aspect Ratio */}
+      <div className="phone-container" style={{ aspectRatio }}>
+        {/* Top Floating Control Bar */}
+        <div className="mirror-topbar">
+          <div className="device-status">
+            <span
+              className="status-dot"
+              style={{ background: isConnected ? '#10b981' : '#ef4444' }}
+            />
+            <span className="device-name">{deviceModel}</span>
+          </div>
+
+          <div className="topbar-actions">
+            <button
+              className={`btn-screenshot ${isCopied ? 'copied' : ''}`}
+              onClick={handleCopyScreenshot}
+              title="Copy screenshot directly to clipboard (Ctrl + V)"
+            >
+              <Camera size={14} />
+              <span>{isCopied ? 'Copied!' : 'Copy Screenshot'}</span>
+            </button>
+
+            <button
+              className="btn-icon"
+              onClick={() => sendAction({ type: 'key', code: 130 })}
+              title="Rotate Screen"
+            >
+              <RotateCw size={13} />
+            </button>
+
+            <button
+              className="btn-icon"
+              onClick={() => sendAction({ type: 'key', code: 26 })}
+              title="Power / Lock"
+            >
+              <Power size={13} color="#ef4444" />
+            </button>
+          </div>
         </div>
 
-        <div className="topbar-actions">
-          {/* Quick Screenshot Button */}
-          <button
-            className={`btn-screenshot ${isCopied ? 'copied' : ''}`}
-            onClick={handleCopyScreenshot}
-            title="Copy screenshot directly to clipboard (Ctrl + V)"
-          >
-            <Camera size={14} />
-            <span>{isCopied ? 'Copied!' : 'Copy Screenshot'}</span>
-          </button>
+        {/* Phone Viewport */}
+        <div className="phone-viewport">
+          {frameUrl ? (
+            <img
+              ref={imgRef}
+              src={frameUrl}
+              alt="Android Screen"
+              className="phone-display-img"
+              onPointerDown={handlePointerDown}
+              onPointerUp={handlePointerUp}
+              onWheel={handleWheel}
+              draggable={false}
+            />
+          ) : (
+            <div className="loading-display">
+              <Smartphone size={36} color="#ff6b00" className="pulse-icon" />
+              <span>Connecting to {deviceModel}...</span>
+            </div>
+          )}
+        </div>
 
-          {/* Quick Rotate Key */}
+        {/* Android Bottom Navigation Dock */}
+        <div className="mirror-nav">
           <button
-            className="btn-icon"
-            onClick={() => sendAction({ type: 'key', code: 130 })}
-            title="Rotate Screen"
+            className="nav-btn"
+            onClick={() => sendAction({ type: 'key', code: 4 })}
+            title="Back"
           >
-            <RotateCw size={13} />
+            <ChevronLeft size={22} />
           </button>
-
-          {/* Quick Power Key */}
           <button
-            className="btn-icon"
-            onClick={() => sendAction({ type: 'key', code: 26 })}
-            title="Power / Lock"
+            className="nav-btn"
+            onClick={() => sendAction({ type: 'key', code: 3 })}
+            title="Home"
           >
-            <Power size={13} color="#ef4444" />
+            <Circle size={15} />
+          </button>
+          <button
+            className="nav-btn"
+            onClick={() => sendAction({ type: 'key', code: 187 })}
+            title="Recents"
+          >
+            <Square size={14} />
           </button>
         </div>
-      </div>
 
-      {/* Screen Mirror Viewport */}
-      <div className="mirror-screen">
-        <canvas
-          ref={canvasRef}
-          className="mirror-canvas"
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-          onWheel={handleWheel}
-        />
+        {/* Toast */}
+        {toastMessage && (
+          <div className="mirror-toast">
+            <CheckCircle2 size={16} color="#10b981" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
       </div>
-
-      {/* Android Bottom Navigation Bar */}
-      <div className="mirror-nav">
-        <button
-          className="nav-btn"
-          onClick={() => sendAction({ type: 'key', code: 4 })}
-          title="Back"
-        >
-          <ChevronLeft size={22} />
-        </button>
-        <button
-          className="nav-btn"
-          onClick={() => sendAction({ type: 'key', code: 3 })}
-          title="Home"
-        >
-          <Circle size={15} />
-        </button>
-        <button
-          className="nav-btn"
-          onClick={() => sendAction({ type: 'key', code: 187 })}
-          title="Recents"
-        >
-          <Square size={14} />
-        </button>
-      </div>
-
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="mirror-toast">
-          <CheckCircle2 size={16} color="#10b981" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
     </div>
   );
 }

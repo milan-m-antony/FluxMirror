@@ -131,8 +131,41 @@ export function adbBridgePlugin(): Plugin {
         }
       });
 
-      // 3. Screen Frame Capture (Piped Stream)
-      server.middlewares.use('/api/frame', (req, res) => {
+      // 3. Screen Frame Capture (Cached Buffer & Streaming)
+      let cachedFrame: Buffer | null = null;
+      let isCapturingFrame = false;
+      let lastCaptureTimestamp = 0;
+
+      const triggerCapture = async (device: string): Promise<Buffer | null> => {
+        if (isCapturingFrame) return cachedFrame;
+        isCapturingFrame = true;
+        try {
+          const buf = await new Promise<Buffer>((resolve, reject) => {
+            const proc = spawn(adbPath, ['-s', device, 'exec-out', 'screencap', '-p']);
+            const chunks: Buffer[] = [];
+            proc.stdout.on('data', chunk => chunks.push(chunk));
+            proc.stderr.on('data', () => {});
+            proc.on('close', (code) => {
+              if (code === 0 && chunks.length > 0) {
+                resolve(Buffer.concat(chunks));
+              } else {
+                reject(new Error(`Screencap failed code ${code}`));
+              }
+            });
+            proc.on('error', reject);
+          });
+
+          cachedFrame = buf;
+          lastCaptureTimestamp = Date.now();
+          return buf;
+        } catch {
+          return cachedFrame;
+        } finally {
+          isCapturingFrame = false;
+        }
+      };
+
+      server.middlewares.use('/api/frame', async (req, res) => {
         const url = new URL(req.url || '', 'http://localhost');
         const requestedDevice = url.searchParams.get('device');
         const device = resolveTargetDevice(requestedDevice);
@@ -142,18 +175,25 @@ export function adbBridgePlugin(): Plugin {
           return res.end('No device connected');
         }
 
-        const proc = spawn(adbPath, ['-s', device, 'exec-out', 'screencap', '-p']);
-        res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        const now = Date.now();
+        // Return cached frame immediately if fresh (< 400ms)
+        if (cachedFrame && (now - lastCaptureTimestamp < 400)) {
+          res.setHeader('Content-Type', 'image/png');
+          res.setHeader('Content-Length', cachedFrame.length);
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.end(cachedFrame);
+        }
 
-        proc.stdout.pipe(res);
-        proc.stderr.on('data', () => {});
-        proc.on('error', () => {
-          if (!res.headersSent) {
-            res.statusCode = 500;
-            res.end();
-          }
-        });
+        const frame = await triggerCapture(device);
+        if (frame && frame.length > 0) {
+          res.setHeader('Content-Type', 'image/png');
+          res.setHeader('Content-Length', frame.length);
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.end(frame);
+        } else {
+          res.statusCode = 500;
+          return res.end('Failed to capture frame');
+        }
       });
 
       // 4. Action Dispatcher (Tap, Swipe, Keyevent, Text Typing)
