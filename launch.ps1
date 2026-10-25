@@ -1,17 +1,17 @@
 <#
 .SYNOPSIS
-    Standalone Android Web Studio Launcher
+    FluxMirror Floating Window Launcher
 .DESCRIPTION
-    Launches the cross-platform Web Studio interface, starts the local ADB bridge server on port 5173, and opens Chrome/Edge.
+    Launches FluxMirror as a standalone floating desktop mirror with screenshot capture and navigation keys.
 .EXAMPLE
-    .\launch.ps1            # Opens in default browser
-    .\launch.ps1 -Float     # Opens as floating standalone window (like scrcpy)
+    .\launch.ps1            # Launches floating app window (like scrcpy)
+    .\launch.ps1 -Browser   # Opens in regular browser tab
     .\launch.ps1 -Build     # Builds production web bundle
 #>
 
 [CmdletBinding()]
 param (
-    [switch]$Float,
+    [switch]$Browser,
     [switch]$Build
 )
 
@@ -34,7 +34,7 @@ if (-not (Get-Command adb -ErrorAction SilentlyContinue)) {
 Write-Host ""
 Write-Host "========================================================" -ForegroundColor DarkCyan
 Write-Host "                     FLUXMIRROR                         " -ForegroundColor Cyan
-Write-Host "   Cross-Platform Device Mirror & Interactive Controller" -ForegroundColor DarkGray
+Write-Host "   Floating Device Mirror, Screenshots & Navigation    " -ForegroundColor DarkGray
 Write-Host "========================================================" -ForegroundColor DarkCyan
 Write-Host ""
 
@@ -46,26 +46,23 @@ if ($Build) {
     exit 0
 }
 
-Write-Host "[+] Starting Android Web Studio on http://localhost:5173..." -ForegroundColor Green
-if ($Float) {
-    Write-Host "[+] Floating Window Mode (Frameless app window enabled)" -ForegroundColor Yellow
-}
-Write-Host "[+] Press Ctrl+C in this terminal to stop the server." -ForegroundColor DarkGray
+Write-Host "[+] Starting FluxMirror on http://localhost:5173..." -ForegroundColor Green
+Write-Host "[+] Press Ctrl+C in this terminal to stop." -ForegroundColor DarkGray
 Write-Host ""
 
-# Launch browser / floating window
+# Launch floating window by default (Chrome / Edge --app mode)
 $chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 
 Start-Sleep -Milliseconds 600
 
-if ($Float) {
+if (-not $Browser) {
     if (Test-Path $chrome) {
-        Start-Process $chrome -ArgumentList "--app=http://localhost:5173?float=true --window-size=420,880"
+        Start-Process $chrome -ArgumentList "--app=http://localhost:5173 --window-size=400,860"
     } elseif (Test-Path $edge) {
-        Start-Process $edge -ArgumentList "--app=http://localhost:5173?float=true --window-size=420,880"
+        Start-Process $edge -ArgumentList "--app=http://localhost:5173 --window-size=400,860"
     } else {
-        Start-Process "http://localhost:5173?float=true"
+        Start-Process "http://localhost:5173"
     }
 } else {
     Start-Process "http://localhost:5173"
