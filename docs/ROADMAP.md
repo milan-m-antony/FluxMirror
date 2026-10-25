@@ -1,6 +1,6 @@
-# Android Web Studio — Feature Roadmap & Next Steps
+# FluxMirror — Feature Roadmap & Next Steps
 
-This roadmap outlines planned enhancements for developing Android Web Studio as a standalone project in a dedicated window or repository.
+This roadmap outlines planned enhancements for developing FluxMirror as a standalone project in a dedicated window or repository.
 
 ---
 

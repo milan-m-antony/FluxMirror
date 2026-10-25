@@ -1,7 +1,7 @@
 {
-  "name": "android-web-studio",
+  "name": "flux-mirror",
   "version": "1.0.0",
-  "description": "Cross-platform browser-based Android device previewer, gesture controller, and instant screenshot companion",
+  "description": "Cross-platform browser-based Android device mirror, interactive gesture controller, floating Picture-in-Picture window, and instant clipboard screenshot tool",
   "type": "module",
   "scripts": {
     "dev": "vite",

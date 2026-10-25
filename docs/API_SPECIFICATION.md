@@ -1,4 +1,4 @@
-# Android Web Studio — API Specification
+# FluxMirror — API Specification
 
 The Node.js Vite middleware (`server/adbBridge.ts`) exposes the following local HTTP REST endpoints:
 

@@ -33,7 +33,7 @@ if (-not (Get-Command adb -ErrorAction SilentlyContinue)) {
 
 Write-Host ""
 Write-Host "========================================================" -ForegroundColor DarkCyan
-Write-Host "                ANDROID WEB STUDIO                     " -ForegroundColor Cyan
+Write-Host "                     FLUXMIRROR                         " -ForegroundColor Cyan
 Write-Host "   Cross-Platform Device Mirror & Interactive Controller" -ForegroundColor DarkGray
 Write-Host "========================================================" -ForegroundColor DarkCyan
 Write-Host ""

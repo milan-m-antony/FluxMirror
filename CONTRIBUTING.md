@@ -1,6 +1,6 @@
-# Contributing to Android Web Studio
+# Contributing to FluxMirror
 
-Thank you for your interest in contributing to **Android Web Studio**! We welcome bug fixes, documentation improvements, new features, and feedback.
+Thank you for your interest in contributing to **FluxMirror**! We welcome bug fixes, documentation improvements, new features, and feedback.
 
 ---
 
@@ -8,8 +8,8 @@ Thank you for your interest in contributing to **Android Web Studio**! We welcom
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/milan-m-antony/Android-Web-Studio.git
-   cd Android-Web-Studio
+   git clone https://github.com/milan-m-antony/FluxMirror.git
+   cd FluxMirror
    ```
 
 2. **Install dependencies:**
@@ -51,4 +51,4 @@ Thank you for your interest in contributing to **Android Web Studio**! We welcom
 ---
 
 ## 💬 Community & Feedback
-Feel free to open an [Issue](https://github.com/milan-m-antony/Android-Web-Studio/issues) for feature requests or bug reports!
+Feel free to open an [Issue](https://github.com/milan-m-antony/FluxMirror/issues) for feature requests or bug reports!

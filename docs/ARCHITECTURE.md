@@ -1,8 +1,8 @@
-# Architecture Blueprint: Android Web Studio
+# Architecture Blueprint: FluxMirror
 
 ## 1. Executive Summary
 
-Android Web Studio is a lightweight, cross-platform web client and Node.js bridge that renders a connected Android device's screen directly into an HTML5 Canvas element inside a modern web browser. It provides low-latency gesture interaction, hardware button simulation, live telemetry streaming, and in-memory screenshot captures.
+FluxMirror is a lightweight, cross-platform web client and Node.js bridge that renders a connected Android device's screen directly into an HTML5 Canvas element inside a modern web browser. It provides low-latency gesture interaction, hardware button simulation, live telemetry streaming, and in-memory screenshot captures.
 
 ---
 

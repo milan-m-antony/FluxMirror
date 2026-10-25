@@ -482,8 +482,8 @@ export function App() {
             <Flame size={20} />
           </div>
           <div className="brand-title">
-            Android Web Studio
-            <span className="brand-badge">Live Mirror</span>
+            FluxMirror
+            <span className="brand-badge">Live</span>
           </div>
         </div>
 
