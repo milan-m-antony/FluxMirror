@@ -58,3 +58,10 @@ It avoids browser-based engines, Electron, WebSockets, and WebCodecs entirely. T
 ### 9. `PerformanceMonitor` (`src/diagnostics/`)
 - Computes real rendered and decoded FPS over a 1-second sliding window without frame duplication.
 - Tracks dropped frames and render latency.
+
+### 10. `TitleBarDecorator` (`tools/screenshot_dock.ps1`)
+- **Native Title Bar Capture Button**: Embeds a non-activating (`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`) vector camera icon directly adjacent to the Minimize button inside the Windows title bar.
+- **HUD Toast Notification**: Displays an animated floating toast (`✓ Copied to clipboard`) featuring obsidian glass (`#1E293B`), vibrant Flux orange border (`#FF6B00`), and emerald checkmark (`#10B981`) centered over the mirror window upon capture.
+- **Title Bar Icon Customization**: Replaces the default window icon with the obsidian Black Flux Logo via `WM_SETICON` (`ICON_SMALL` & `ICON_BIG`) and `GCLP_HICON`.
+- **Maximize Button Removal**: Strips `WS_MAXIMIZEBOX` from `GWL_STYLE` and deletes `SC_MAXIMIZE` from the window system menu to prevent aspect ratio distortion.
+- **Sub-Millisecond Synchronization**: Tracks mirror window bounds at ~80 FPS via high-precision `DispatcherTimer` and Win32 `GetWindowRect` to guarantee zero jitter during drag and resize operations.
