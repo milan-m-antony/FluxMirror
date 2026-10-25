@@ -37,6 +37,16 @@ FluxMirror is built from the ground up for high-performance cross-platform opera
 - **🪟 Persistent Floating Window (Always-On-Top):**
   - Window defaults to floating mode (`--always-on-top`), remaining pinned above code editors, terminals, and browsers while you type code.
   - Does not hide, lose focus, or minimize when interacting with background applications.
+- **🛜 1-Click Wireless ADB Switcher:**
+  - One-click migration from wired USB to wireless high-speed mirroring.
+  - Automatically initializes `adb tcpip 5555`, queries the phone's local Wi-Fi IP address, and verifies wireless ADB connection.
+  - Displays a vector Wi-Fi badge in the title bar that turns **emerald green (`#10B981`)** when connected wirelessly.
+  - **Unplugging the USB cable** allows mirroring to continue seamlessly over Wi-Fi without interrupting your session.
+- **📱 Multi-Device Title Bar Dropdown:**
+  - Sleek dark pill dropdown button (`[ 📱 <Model> ▼ ]`) integrated directly into the window title bar.
+  - Displays the active device model (e.g. `SM_G990B2`) with responsive compact fallback for narrow viewports.
+  - 1-click native menu displays all connected devices, serials, and connection transport (USB or Wi-Fi).
+  - Effortlessly switch between multiple test phones or BLE bridge devices on the fly without restarting or re-running scripts.
 - **📷 Integrated Title Bar Camera Notch Screenshot Button:**
   - Built directly into the native window controls logic (replacing the Maximize button to maintain strict phone aspect ratio).
   - Sleek vector camera notch icon styled for dark title bars with subtle hover and pressed states.
