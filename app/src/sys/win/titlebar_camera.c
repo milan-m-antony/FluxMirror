@@ -194,18 +194,31 @@ get_device_wifi_ip(const char *serial, char *out_ip, size_t max_len) {
     return false;
 }
 
-static void
-update_current_device_model(void) {
+static unsigned __stdcall
+device_model_discovery_worker(void *arg) {
+    (void) arg;
     adb_device_info_t devs[8];
     int count = get_device_list(s_serial, devs, 8);
     for (int i = 0; i < count; i++) {
         if (devs[i].is_active || count == 1) {
             snprintf(s_device_model, sizeof(s_device_model), "%s", devs[i].model);
-            return;
+            if (s_device_hwnd && IsWindow(s_device_hwnd)) {
+                InvalidateRect(s_device_hwnd, NULL, FALSE);
+            }
+            return 0;
         }
     }
+    return 0;
+}
+
+static void
+start_device_model_discovery(void) {
     if (s_serial[0] != '\0') {
         snprintf(s_device_model, sizeof(s_device_model), "%s", s_serial);
+    }
+    uintptr_t th = _beginthreadex(NULL, 0, device_model_discovery_worker, NULL, 0, NULL);
+    if (th) {
+        CloseHandle((HANDLE) th);
     }
 }
 
@@ -356,7 +369,7 @@ show_device_dropdown_menu(HWND hwnd) {
     } else if (cmd == 201) {
         trigger_wireless_adb_switch();
     } else if (cmd == 202) {
-        update_current_device_model();
+        start_device_model_discovery();
         reposition_controls();
         InvalidateRect(hwnd, NULL, FALSE);
     }
@@ -1070,15 +1083,30 @@ DeviceDropdownBtnWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 // ---------------------------------------------------------------------------
 static void
 reposition_controls(void) {
-    if (!s_main_hwnd || !IsWindow(s_main_hwnd)) {
+    static bool s_in_reposition = false;
+    if (s_in_reposition) {
         return;
     }
+    s_in_reposition = true;
+
+    if (!s_main_hwnd || !IsWindow(s_main_hwnd)) {
+        s_in_reposition = false;
+        return;
+    }
+
+    static int s_last_cam_x = -9999, s_last_cam_y = -9999, s_last_cam_w = -1, s_last_cam_h = -1;
+    static int s_last_wifi_x = -9999, s_last_wifi_y = -9999, s_last_wifi_w = -1, s_last_wifi_h = -1;
+    static int s_last_dev_x = -9999, s_last_dev_y = -9999, s_last_dev_w = -1, s_last_dev_h = -1;
 
     if (IsIconic(s_main_hwnd) || !IsWindowVisible(s_main_hwnd)) {
         if (s_cam_hwnd && IsWindow(s_cam_hwnd)) ShowWindow(s_cam_hwnd, SW_HIDE);
         if (s_wifi_hwnd && IsWindow(s_wifi_hwnd)) ShowWindow(s_wifi_hwnd, SW_HIDE);
         if (s_device_hwnd && IsWindow(s_device_hwnd)) ShowWindow(s_device_hwnd, SW_HIDE);
         if (s_toast_hwnd && IsWindow(s_toast_hwnd)) ShowWindow(s_toast_hwnd, SW_HIDE);
+        s_last_cam_x = -9999;
+        s_last_wifi_x = -9999;
+        s_last_dev_x = -9999;
+        s_in_reposition = false;
         return;
     }
 
@@ -1100,6 +1128,12 @@ reposition_controls(void) {
         camY = maxRect.top;
         camW = maxRect.right - maxRect.left;
         camH = maxRect.bottom - maxRect.top;
+    } else if (minRect.right > minRect.left && minRect.bottom > minRect.top) {
+        // Fallback: place immediately to left of Minimize
+        camW = minRect.right - minRect.left;
+        camH = minRect.bottom - minRect.top;
+        camX = minRect.left - camW;
+        camY = minRect.top;
     } else {
         camW = 47;
         camH = 29;
@@ -1107,31 +1141,41 @@ reposition_controls(void) {
         camY = winRect.top + 3;
     }
 
-    // 2. Wireless Badge immediately to the left of Minimize
+    // 2. Wireless Badge immediately to the left of the leftmost title button
+    int leftControlX = (minRect.right > minRect.left && minRect.left < camX) ? minRect.left : camX;
     int wifiW = 32;
     int wifiH = (minRect.bottom > minRect.top) ? (minRect.bottom - minRect.top) : camH;
-    int wifiX = (minRect.right > minRect.left) ? (minRect.left - wifiW) : (camX - 47 - wifiW);
+    int wifiX = leftControlX - wifiW;
     int wifiY = (minRect.bottom > minRect.top) ? minRect.top : camY;
 
     // 3. Multi-Device Dropdown immediately to the left of Wireless Badge
-    int devW = (winWidth < 360) ? 30 : 96;
+    int devW = (winWidth < 380) ? 30 : 96;
     int devH = wifiH;
     int devX = wifiX - devW - 2;
     int devY = wifiY;
 
     if (s_cam_hwnd && IsWindow(s_cam_hwnd)) {
-        SetWindowPos(s_cam_hwnd, HWND_TOPMOST, camX, camY, camW, camH,
-                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        if (!IsWindowVisible(s_cam_hwnd) || camX != s_last_cam_x || camY != s_last_cam_y || camW != s_last_cam_w || camH != s_last_cam_h) {
+            s_last_cam_x = camX; s_last_cam_y = camY; s_last_cam_w = camW; s_last_cam_h = camH;
+            SetWindowPos(s_cam_hwnd, HWND_TOP, camX, camY, camW, camH,
+                         SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
     }
 
     if (s_wifi_hwnd && IsWindow(s_wifi_hwnd)) {
-        SetWindowPos(s_wifi_hwnd, HWND_TOPMOST, wifiX, wifiY, wifiW, wifiH,
-                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        if (!IsWindowVisible(s_wifi_hwnd) || wifiX != s_last_wifi_x || wifiY != s_last_wifi_y || wifiW != s_last_wifi_w || wifiH != s_last_wifi_h) {
+            s_last_wifi_x = wifiX; s_last_wifi_y = wifiY; s_last_wifi_w = wifiW; s_last_wifi_h = wifiH;
+            SetWindowPos(s_wifi_hwnd, HWND_TOP, wifiX, wifiY, wifiW, wifiH,
+                         SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
     }
 
     if (s_device_hwnd && IsWindow(s_device_hwnd)) {
-        SetWindowPos(s_device_hwnd, HWND_TOPMOST, devX, devY, devW, devH,
-                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        if (!IsWindowVisible(s_device_hwnd) || devX != s_last_dev_x || devY != s_last_dev_y || devW != s_last_dev_w || devH != s_last_dev_h) {
+            s_last_dev_x = devX; s_last_dev_y = devY; s_last_dev_w = devW; s_last_dev_h = devH;
+            SetWindowPos(s_device_hwnd, HWND_TOP, devX, devY, devW, devH,
+                         SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
     }
 
     if (s_toast_hwnd && IsWindow(s_toast_hwnd) && IsWindowVisible(s_toast_hwnd)) {
@@ -1144,12 +1188,13 @@ reposition_controls(void) {
         SetWindowPos(s_toast_hwnd, HWND_TOPMOST, toastX, toastY, toastW, toastH,
                      SWP_NOACTIVATE | SWP_NOZORDER);
     }
+
+    s_in_reposition = false;
 }
 
 static LRESULT CALLBACK
 MainWndSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
-        case WM_WINDOWPOSCHANGING:
         case WM_WINDOWPOSCHANGED:
         case WM_MOVE:
         case WM_MOVING:
@@ -1157,15 +1202,26 @@ MainWndSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         case WM_SIZING:
         case WM_ENTERSIZEMOVE:
         case WM_EXITSIZEMOVE:
-        case WM_SHOWWINDOW:
+        case WM_SHOWWINDOW: {
+            reposition_controls();
+            break;
+        }
         case WM_KILLFOCUS:
         case WM_SETFOCUS:
         case WM_ACTIVATE:
         case WM_NCACTIVATE: {
-            reposition_controls();
-            if (s_cam_hwnd && IsWindow(s_cam_hwnd)) InvalidateRect(s_cam_hwnd, NULL, FALSE);
-            if (s_wifi_hwnd && IsWindow(s_wifi_hwnd)) InvalidateRect(s_wifi_hwnd, NULL, FALSE);
-            if (s_device_hwnd && IsWindow(s_device_hwnd)) InvalidateRect(s_device_hwnd, NULL, FALSE);
+            if (s_cam_hwnd && IsWindow(s_cam_hwnd)) {
+                SetWindowPos(s_cam_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                InvalidateRect(s_cam_hwnd, NULL, FALSE);
+            }
+            if (s_wifi_hwnd && IsWindow(s_wifi_hwnd)) {
+                SetWindowPos(s_wifi_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                InvalidateRect(s_wifi_hwnd, NULL, FALSE);
+            }
+            if (s_device_hwnd && IsWindow(s_device_hwnd)) {
+                SetWindowPos(s_device_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                InvalidateRect(s_device_hwnd, NULL, FALSE);
+            }
             break;
         }
         case WM_DESTROY: {
@@ -1199,7 +1255,7 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
         strncpy(s_serial, serial, sizeof(s_serial) - 1);
     }
 
-    update_current_device_model();
+    start_device_model_discovery();
 
     // 1. Enable Windows 10/11 immersive dark mode on title bar
     BOOL darkMode = TRUE;
@@ -1330,8 +1386,8 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
     // 9. Subclass main window procedure
     s_orig_wndproc = (WNDPROC) SetWindowLongPtr(s_main_hwnd, GWLP_WNDPROC, (LONG_PTR) MainWndSubclassProc);
 
-    // 10. Start continuous 60 FPS heartbeat timer on camera window
-    SetTimer(s_cam_hwnd, SYNC_TIMER_ID, 16, NULL);
+    // 10. Start continuous heartbeat timer on camera window to follow fast dragging
+    SetTimer(s_cam_hwnd, SYNC_TIMER_ID, 33, NULL);
 
     reposition_controls();
     LOGI("Native titlebar camera, wireless badge, and device dropdown initialized successfully");
