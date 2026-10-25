@@ -35,23 +35,25 @@
 
 ---
 
-## 🚀 1-Click Launchers (Command Prompt)
+## 🚀 1-Click Launchers
 
-Run directly from Windows Command Prompt (`cmd.exe`):
-
+### Windows (Command Prompt)
 ```cmd
-automate.bat
+start.bat
 ```
 
-*(Or `start.bat`)*
-
-### Build from Source:
-
-To recompile the native engine using MSYS2 / UCRT64:
-
-```cmd
-build.bat
+### macOS & Linux (Terminal)
+```bash
+chmod +x start.sh
+./start.sh
 ```
+
+---
+
+## 🛠️ Building Native Engine from Source
+
+* **Windows**: `build.bat` (or `ninja -C build-win64`)
+* **macOS & Linux**: `meson setup build && ninja -C build`
 
 ---
 
@@ -59,10 +61,9 @@ build.bat
 
 ```
 previewer/
-├── automate.bat                # 1-click Command Prompt launcher
-├── start.bat                   # Device detection & execution script
-├── build.bat                   # Meson & Ninja build script
-├── launch.bat                  # Alternative launcher
+├── start.bat                   # Windows Command Prompt launcher
+├── start.sh                    # macOS & Linux Bash launcher
+├── build.bat                   # Windows build script
 ├── meson.build                 # Root Meson build configuration
 ├── meson_options.txt           # Build options
 ├── scrcpy-server               # Prebuilt Android server jar
