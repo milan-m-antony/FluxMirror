@@ -31,7 +31,7 @@ try {
     $headers = @{ "User-Agent" = "FluxMirror-Launcher" }
     $ReleaseInfo = Invoke-RestMethod -Uri $apiUrl -Headers $headers -Method Get
 } catch {
-    Write-Host "[!] Could not fetch latest release info from GitHub (offline or release pending)." -ForegroundColor Yellow
+    Write-Host "(*) Could not fetch latest release info from GitHub (offline or release pending)." -ForegroundColor Yellow
 }
 
 $NeedDownload = $true
@@ -56,7 +56,7 @@ if ($ReleaseInfo -and $ReleaseInfo.tag_name) {
 if ($NeedDownload) {
     if (-not $ReleaseInfo -or -not $ReleaseInfo.assets) {
         if (Test-Path $TargetExe) {
-            Write-Host "[!] No online release assets found, running existing local installation." -ForegroundColor Yellow
+            Write-Host "(*) No online release assets found, running existing local installation." -ForegroundColor Yellow
         } else {
             Write-Error "No published release found on GitHub yet. Please download from: https://github.com/$Repo/releases"
             return
@@ -75,7 +75,7 @@ if ($NeedDownload) {
         $tempZip = Join-Path $tempDir $zipAsset.name
 
         try {
-            Write-Host "[+] Downloading FluxMirror $VersionTag ($([Math]::Round($zipAsset.size / 1MB, 1)) MB)..." -ForegroundColor Cyan
+            Write-Host "[+] Downloading FluxMirror $VersionTag ($([Math]::Round($zipAsset.size / 1MB, 2)) MB)..." -ForegroundColor Cyan
             (New-Object System.Net.WebClient).DownloadFile($zipAsset.browser_download_url, $tempZip)
 
             # Cryptographic verification
@@ -85,7 +85,8 @@ if ($NeedDownload) {
                 $computedHash = (Get-FileHash -Path $tempZip -Algorithm SHA256).Hash.ToLower()
 
                 $matchFound = $false
-                foreach ($line in ($shaContent -split "`n")) {
+                $lines = $shaContent -split "\r?\n"
+                foreach ($line in $lines) {
                     $parts = $line.Trim() -split "\s+"
                     if ($parts.Count -ge 2 -and $parts[0].ToLower() -eq $computedHash) {
                         $matchFound = $true
@@ -98,9 +99,9 @@ if ($NeedDownload) {
                     Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
                     return
                 }
-                Write-Host "✓ Checksum verification passed ($computedHash)" -ForegroundColor Green
+                Write-Host "[OK] Checksum verification passed ($computedHash)" -ForegroundColor Green
             } else {
-                Write-Host "[!] Notice: SHA256SUMS.txt not present in release assets, skipping verification." -ForegroundColor Yellow
+                Write-Host "(*) Notice: SHA256SUMS.txt not present in release assets, skipping verification." -ForegroundColor Yellow
             }
 
             Write-Host "[+] Installing to $InstallDir..." -ForegroundColor Cyan
@@ -113,7 +114,7 @@ if ($NeedDownload) {
             [System.IO.Compression.ZipFile]::ExtractToDirectory($tempZip, $InstallDir)
 
             Set-Content -Path "$InstallDir\version.txt" -Value $VersionTag -Force
-            Write-Host "✓ Installation completed successfully!" -ForegroundColor Green
+            Write-Host "[OK] Installation completed successfully!" -ForegroundColor Green
         } finally {
             Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
         }

@@ -33,7 +33,7 @@ echo [+] Detecting connected Android device...
 set "TARGET_SERIAL="
 set "UNAUTH_FOUND=0"
 
-for /f "tokens=1,2" %%A in ('"!ADB_BIN!" devices 2^>nul') do (
+for /f "tokens=1,2" %%A in ('"!ADB_BIN!" devices') do (
     if "%%B"=="device" (
         if not defined TARGET_SERIAL set "TARGET_SERIAL=%%A"
     ) else if "%%B"=="unauthorized" (
@@ -44,11 +44,11 @@ for /f "tokens=1,2" %%A in ('"!ADB_BIN!" devices 2^>nul') do (
 if not defined TARGET_SERIAL (
     if "!UNAUTH_FOUND!"=="1" (
         echo [!] Warning: An Android device is connected but UNAUTHORIZED.
-        echo     Please check your phone's screen and tap "Allow USB debugging".
-        echo     (Check "Always allow from this computer" for convenience).
+        echo     Please check your phone screen and tap "Allow USB debugging".
+        echo     Check "Always allow from this computer" for convenience.
     ) else (
         echo [x] Error: No Android device detected via ADB.
-        echo     1. Connect your device via USB cable (or enable Wireless Debugging).
+        echo     1. Connect your device via USB cable or enable Wireless Debugging.
         echo     2. Ensure "USB Debugging" is enabled in Developer Options.
         echo     3. Run 'adb devices' to verify detection.
     )
@@ -69,14 +69,27 @@ if not defined FLUX_BIN (
     exit /b 1
 )
 
-:: 4. Launch in dedicated external CMD window outside the IDE (or inline if requested)
+:: 4. Process arguments
+set "INLINE_MODE=0"
+set "EXTRA_ARGS="
+
+:args_loop
+if "%~1"=="" goto args_done
 if "%~1"=="--inline" (
-    shift
+    set "INLINE_MODE=1"
+) else (
+    set "EXTRA_ARGS=!EXTRA_ARGS! %1"
+)
+shift
+goto args_loop
+:args_done
+
+if "!INLINE_MODE!"=="1" (
     echo [+] Launching FluxMirror inline...
-    "!FLUX_BIN!" -s !TARGET_SERIAL! --window-title "FluxMirror" --always-on-top --max-fps 120 --video-buffer 0 --video-codec h264 --video-bit-rate 16M --stay-awake --print-fps %*
+    "!FLUX_BIN!" -s !TARGET_SERIAL! --window-title "FluxMirror" --always-on-top --max-fps 120 --video-buffer 0 --video-codec h264 --video-bit-rate 16M --stay-awake --print-fps !EXTRA_ARGS!
 ) else (
     echo [+] Spawning dedicated external Command Prompt window outside IDE...
-    start "FluxMirror Engine" cmd.exe /c ""!FLUX_BIN!" -s !TARGET_SERIAL! --window-title "FluxMirror" --always-on-top --max-fps 120 --video-buffer 0 --video-codec h264 --video-bit-rate 16M --stay-awake --print-fps %* || pause"
+    start "FluxMirror Engine" cmd.exe /c ""!FLUX_BIN!" -s !TARGET_SERIAL! --window-title "FluxMirror" --always-on-top --max-fps 120 --video-buffer 0 --video-codec h264 --video-bit-rate 16M --stay-awake --print-fps !EXTRA_ARGS! || pause"
     echo [+] FluxMirror running in dedicated window outside IDE.
 )
 
