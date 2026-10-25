@@ -599,8 +599,8 @@ reposition_controls(void) {
     }
 
     if (s_cam_hwnd && IsWindow(s_cam_hwnd)) {
-        SetWindowPos(s_cam_hwnd, s_main_hwnd, camX, camY, camW, camH,
-                     SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        SetWindowPos(s_cam_hwnd, HWND_TOPMOST, camX, camY, camW, camH,
+                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 
     if (s_toast_hwnd && IsWindow(s_toast_hwnd) && IsWindowVisible(s_toast_hwnd)) {
@@ -626,6 +626,8 @@ MainWndSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         case WM_ENTERSIZEMOVE:
         case WM_EXITSIZEMOVE:
         case WM_SHOWWINDOW:
+        case WM_KILLFOCUS:
+        case WM_SETFOCUS:
         case WM_ACTIVATE:
         case WM_NCACTIVATE: {
             reposition_controls();
@@ -674,8 +676,8 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
     LONG_PTR style = GetWindowLongPtr(s_main_hwnd, GWL_STYLE);
     style &= ~WS_MAXIMIZEBOX;
     SetWindowLongPtr(s_main_hwnd, GWL_STYLE, style);
-    SetWindowPos(s_main_hwnd, NULL, 0, 0, 0, 0,
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    SetWindowPos(s_main_hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
     // 3. Remove SC_MAXIMIZE from system menu
     HMENU hMenu = GetSystemMenu(s_main_hwnd, FALSE);
@@ -683,7 +685,7 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
         DeleteMenu(hMenu, SC_MAXIMIZE, MF_BYCOMMAND);
     }
 
-    // 4. Set Black Flux application icon
+    // 4. Set Flux application icon
     HINSTANCE hInstance = GetModuleHandle(NULL);
     HICON hIcon = (HICON) LoadImage(hInstance, MAKEINTRESOURCE(0), IMAGE_ICON, 16, 16, 0);
     if (hIcon) {
@@ -714,9 +716,9 @@ sc_titlebar_camera_init(SDL_Window *window, const char *serial) {
     wcToast.lpszClassName = "FluxToastNotification";
     RegisterClassEx(&wcToast);
 
-    // 7. Create Camera Button Window (owned by s_main_hwnd)
+    // 7. Create Camera Button Window (owned by s_main_hwnd, always topmost)
     s_cam_hwnd = CreateWindowEx(
-        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
         "FluxCameraTitleBtn",
         "CameraBtn",
         WS_POPUP | WS_VISIBLE,

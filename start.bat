@@ -47,6 +47,6 @@ if not exist "!FLUX_BIN!" (
 )
 
 echo [+] Launching FluxMirror native window...
-"!FLUX_BIN!" -s !TARGET_SERIAL! --window-title "FluxMirror" --max-fps 120 --video-buffer 0 --video-codec h264 --video-bit-rate 16M --stay-awake --print-fps %*
+"!FLUX_BIN!" -s !TARGET_SERIAL! --window-title "FluxMirror" --always-on-top --max-fps 120 --video-buffer 0 --video-codec h264 --video-bit-rate 16M --stay-awake --print-fps %*
 
 endlocal
