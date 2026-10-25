@@ -1,98 +1,144 @@
-# FluxMirror — 60 FPS Device Mirror & Interactive Controller
+# FluxMirror — Native 60–120 FPS Android Screen Mirror & Controller
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![React 19](https://img.shields.io/badge/React-19-61dafb.svg?logo=react&logoColor=black)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Vite](https://img.shields.io/badge/Vite-8.0-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg?logo=c%2B%2B)](https://en.cppreference.com/w/cpp/20)
+[![Qt 6](https://img.shields.io/badge/Qt-6.4+-41CD52.svg?logo=qt)](https://www.qt.io/)
+[![CMake](https://img.shields.io/badge/CMake-3.22+-064F8C.svg?logo=cmake)](https://cmake.org/)
+[![Ninja](https://img.shields.io/badge/Ninja-Fast-black.svg)](https://ninja-build.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/milan-m-antony/FluxMirror/pulls)
 
-> **High-performance 60 FPS Android device mirror, interactive gesture controller, always-on-top floating window, and instant clipboard screenshot tool.**
+> **High-performance, native-first desktop application for mirroring and controlling Android devices with maximum refresh rate (60–120 FPS) and ultra-low latency across Windows, Linux, and macOS.**
 
 ---
 
-## 🌟 Dual-Engine Modes
+## 🌟 Key Capabilities
 
-| Feature | ⚡ Mode 1: Native 60 FPS Mirror (Default) | 🌐 Mode 2: Web Studio Mode |
-| :--- | :--- | :--- |
-| **Engine** | Direct3D11 / GPU MediaCodec | React 19 HTML5 Canvas / Vite |
-| **Frame Rate** | **60 FPS Buttery Smooth** | Telemetry Canvas Stream |
-| **Latency** | **< 15 ms (Zero Lag)** | ~800–1200 ms (USB Screencap) |
-| **Aspect Ratio** | Locked to exact phone ratio (1080×2340) | Locked responsive scaling (No stretching) |
-| **Always-On-Top** | Native Windows `HWND_TOPMOST` (`--always-on-top`) | W3C Document Picture-in-Picture |
-| **Screenshot Tool** | Floating docked `[Copy Screenshot]` pill button | On-screen `Copy Screenshot` button |
-| **Navigation** | Right-click (Back), Middle-click (Home), Alt+S (Recents) | On-screen Back (`◀`), Home (`●`), Recents (`■`) |
-| **Launch Command** | `.\launch.bat` | `.\launch.bat -Web` |
+- **🚀 Native-First Performance (Zero Browser Overhead):**
+  - Built with **C++20** and **Qt 6 / QML**.
+  - Direct GPU rendering via **Direct3D11** (Windows), **Metal** (macOS), and **OpenGL/Vulkan** (Linux).
+  - Eliminates all WebSockets, WebCodecs, and browser overhead.
+- **⚡ Maximum Refresh Rate (60–120+ FPS):**
+  - Auto-detects device panel capabilities (e.g. 120Hz display on Samsung Galaxy S21 FE / modern flagships).
+  - Supports configurable stream targets: **60 FPS**, **90 FPS**, **120 FPS**, or uncapped.
+- **⏱️ Ultra-Low End-to-End Latency (~15–25 ms):**
+  - Zero-buffer pipeline (`--video-buffer=0`).
+  - Hardware H.264 / H.265 video encoding via device `MediaCodec`.
+  - Non-blocking asynchronous input event processing.
+- **📐 Exact Screen Aspect-Ratio Preservation:**
+  - Locks strictly to your device's physical aspect ratio ($1080 \times 2340$).
+  - Smooth dynamic window resizing with pillarboxing / letterboxing — **never stretches, squishes, or distorts**.
+  - Automatic adaptation on device rotation (portrait $\leftrightarrow$ landscape).
+- **📌 Desktop Window Management:**
+  - **Always-On-Top** mode: stays pinned above IDEs and code editors.
+  - **Fullscreen** mode (`F11`).
+- **📷 Instant Clipboard Screenshots:**
+  - 1-click **`Copy Screenshot`** button copies the full-resolution frame directly to your system clipboard (`Ctrl + V` / `Cmd + V`).
+  - Save screenshot dialog to export PNG directly to disk.
+- **🎮 Responsive Input Controls:**
+  - Left-Click: Tap / Drag / Swipe.
+  - Right-Click: **Back** (`◀`).
+  - Middle-Click: **Home** (`●`).
+  - Alt + S: **Recents / Multitasking** (`■`).
+  - Alt + R: **Rotate Screen**.
+  - Bidirectional text clipboard synchronization (`Ctrl + C` / `Ctrl + V`).
 
 ---
 
-## 🚀 Quick Start Guide
+## 🚀 Quick Start (1-Click Launchers)
 
-### Prerequisites
-1. **Android SDK Platform Tools (ADB)** in PATH or at `C:\Android\Sdk\platform-tools`.
-2. Connected Android device with **USB Debugging** enabled.
-
----
-
-### Option 1: 1-Click Launch (60 FPS Ultra-Fast, Zero Lag)
-
-Double-click `launch.bat` in this folder:
+### 1. Windows
+Double-click `start.bat` in the repository root:
 ```cmd
-launch.bat
+start.bat
 ```
-Or via PowerShell:
-```powershell
-.\launch.ps1
+*(Or via PowerShell: `.\scripts\windows\start.ps1 -Fps 120`)*
+
+### 2. Linux
+```bash
+chmod +x ./scripts/linux/start.sh
+./scripts/linux/start.sh
 ```
-* **Left Click**: Tap & Drag / Swipe
-* **Right Click**: Back
-* **Middle Click**: Home
-* **Alt + S**: Recents / App Switcher
-* **Alt + R**: Rotate Screen
-* **Docked Pill**: 1-click **Copy Screenshot** straight to clipboard for instant `Ctrl + V` pasting into Antigravity IDE, GitHub, or documentation!
+
+### 3. macOS
+Double-click `scripts/macos/start.command` or run:
+```bash
+chmod +x ./scripts/macos/start.command
+./scripts/macos/start.command
+```
 
 ---
 
-### Option 2: Web Studio Mode (Browser & Picture-in-Picture)
-
-```cmd
-launch.bat -Web
-```
-Or via PowerShell:
-```powershell
-.\launch.ps1 -Web
-```
-Opens the browser interface on [http://localhost:5173](http://localhost:5173) with:
-- HTML5 Canvas zero-broken-icon stream
-- Exact aspect-ratio preservation (resizes without stretching)
-- Always-On-Top Pin toggle
-- On-screen navigation gestures (Back, Home, Recents)
-
----
-
-## 🏗️ Project Architecture
+## 🏗️ Repository Structure
 
 ```
 previewer/
-├── launch.bat               # 1-click launcher (60 FPS Native Mirror by default)
-├── launch.ps1               # PowerShell runner with -Web switch
-├── package.json             # Node.js project manifest & dependencies
-├── vite.config.ts           # Vite configuration with embedded ADB Bridge plugin
-├── tools/
-│   └── screenshot_dock.ps1  # Floating Always-on-Top "Copy Screenshot" dock button
-├── server/
-│   └── adbBridge.ts         # Node.js Vite middleware for ADB process orchestration
+├── CMakeLists.txt              # Root C++20 / Qt 6 CMake build configuration
+├── CMakePresets.json           # Native presets for MSVC, GCC, and AppleClang
+├── vcpkg.json                  # C++ dependency manifest (Qt 6, FFmpeg)
+├── start.bat                   # 1-click Windows native launcher
 ├── src/
-│   ├── App.tsx              # React 19 Canvas gesture engine, PiP mode & controls
-│   ├── index.css            # Responsive exact-aspect-ratio design system
-│   └── main.tsx             # React application entry point
-├── docs/
-│   ├── ARCHITECTURE.md      # In-depth architectural blueprint
-│   ├── ROADMAP.md           # Feature roadmap
-│   └── API_SPECIFICATION.md # REST endpoint documentation for the ADB bridge
-└── dist/                    # Production-ready web assets
+│   ├── app/
+│   │   ├── main.cpp            # Application entrypoint & CLI argument parser
+│   │   └── AppController.cpp   # Coordinates modules into QML context
+│   ├── device/
+│   │   └── DeviceManager.cpp   # ADB discovery, refresh rate (120Hz) detection
+│   ├── connection/
+│   │   └── ConnectionManager.cpp # USB & Wi-Fi TCP/IP tunnels
+│   ├── mirroring/
+│   │   ├── MirrorEngine.cpp    # Scrcpy process & protocol orchestration
+│   │   └── ScrcpyProtocol.hpp  # Binary packet & control message definitions
+│   ├── video/
+│   │   └── VideoDecoder.cpp    # FFmpeg / hardware decoding pipeline
+│   ├── rendering/
+│   │   └── VideoRenderer.cpp   # Qt Quick GPU surface with aspect ratio lock
+│   ├── input/
+│   │   └── InputController.cpp # Normalized coordinate mapping & navigation
+│   ├── clipboard/
+│   │   └── ClipboardManager.cpp# Native clipboard screenshots & text sync
+│   ├── window/
+│   │   └── WindowManager.cpp   # Always-on-top, fullscreen & resize management
+│   ├── diagnostics/
+│   │   └── PerformanceMonitor.cpp # Real FPS counter, dropped frames, latency
+│   └── ui/
+│       ├── Main.qml            # Core QML window & keyboard shortcuts
+│       ├── MirrorViewport.qml  # Video canvas & bottom navigation dock
+│       ├── DeviceToolbar.qml   # Top status bar, screenshot copy & pin toggle
+│       └── PerformanceOverlay.qml # Live FPS telemetry overlay
+├── scripts/
+│   ├── windows/start.bat / start.ps1
+│   ├── linux/start.sh
+│   └── macos/start.command
+├── tests/
+│   ├── CMakeLists.txt          # CTest suite
+│   ├── test_aspect_ratio.cpp   # Validates exact aspect-ratio math
+│   └── test_coordinate_mapping.cpp # Validates pixel-perfect touch mapping
+└── docs/
+    ├── ARCHITECTURE.md         # Detailed architectural breakdown
+    ├── BUILDING.md             # Compilation guide for Windows, Linux, macOS
+    └── PERFORMANCE.md          # Benchmark methodology & latency report
+```
+
+---
+
+## 🛠️ Building from Source
+
+See [docs/BUILDING.md](file:///./docs/BUILDING.md) for complete build instructions using CMake Presets:
+
+```bash
+# Windows
+cmake --preset windows-msvc
+cmake --build --preset windows-release
+
+# Linux
+cmake --preset linux-gcc
+cmake --build --preset linux-release
+
+# macOS
+cmake --preset macos-clang
+cmake --build --preset macos-release
 ```
 
 ---
 
 ## 📜 License
-MIT License. Free for open-source and commercial use.
+MIT License. Free for personal, academic, and commercial use.

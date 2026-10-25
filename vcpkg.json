@@ -1,0 +1,22 @@
+{
+  "name": "mirrorapp",
+  "version-string": "1.0.0",
+  "description": "High-Performance Native Cross-Platform Android Screen Mirror & Controller",
+  "homepage": "https://github.com/milan-m-antony/FluxMirror",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "qtbase",
+      "default-features": false,
+      "features": ["gui", "widgets", "network", "concurrent"]
+    },
+    {
+      "name": "qtdeclarative"
+    },
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": ["avcodec", "avutil", "swscale"]
+    }
+  ]
+}

@@ -75,7 +75,13 @@ function Copy-MobileScreenshotToClipboard {
 
 if ($Snap) {
     $ok = Copy-MobileScreenshotToClipboard
-    exit ($ok ? 0 : 1)
+    if ($ok) {
+        Write-Host "[+] Screenshot copied to clipboard! Press Ctrl+V in chat." -ForegroundColor Green
+        exit 0
+    } else {
+        Write-Host "[x] Failed to capture mobile screen." -ForegroundColor Red
+        exit 1
+    }
 }
 
 Add-Type @"
