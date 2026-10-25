@@ -24,18 +24,30 @@ html, body, #root {
   color: var(--text-main);
 }
 
-/* Pure Phone Window (Zero Outer Margin, Zero Outer Box) */
-.mirror-window {
+/* Full Viewport Root (Centers Phone Chassis with Zero Stretch) */
+.mirror-root {
   width: 100vw;
   height: 100vh;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   background-color: #000;
   position: relative;
   overflow: hidden;
 }
 
-/* Top Floating Control Bar */
+/* Phone Container (Strictly Locked to Phone Aspect Ratio) */
+.phone-container {
+  display: flex;
+  flex-direction: column;
+  background-color: #000;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 35px rgba(0, 0, 0, 0.85);
+  margin: auto;
+}
+
+/* Top Control Bar */
 .mirror-topbar {
   height: 38px;
   background: var(--bg-topbar);
@@ -134,7 +146,7 @@ html, body, #root {
   border-color: var(--flux-orange);
 }
 
-/* Screen Mirror Viewport (100% Responsive, Drag to resize) */
+/* Screen Viewport */
 .mirror-viewport {
   flex: 1;
   width: 100%;
@@ -148,13 +160,42 @@ html, body, #root {
   cursor: pointer;
 }
 
-.mirror-img {
+/* Canvas Viewport: Exact Aspect Ratio, Never Stretched */
+.mirror-canvas {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
   user-select: none;
-  -webkit-user-drag: none;
+}
+
+/* Loading Placeholder */
+.screen-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #000;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 10;
+}
+
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--flux-orange);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Android Bottom Navigation Bar */

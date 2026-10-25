@@ -1,4 +1,4 @@
-import { execSync, spawn } from 'node:child_process';
+import { execSync, execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
@@ -84,32 +84,11 @@ export function adbBridgePlugin(): Plugin {
           const sizeOut = execSync(`"${adbPath}" -s ${device} shell wm size`, { encoding: 'utf-8' }).trim();
 
           let width = 1080;
-          let height = 2400;
+          let height = 2340;
           const match = sizeOut.match(/(\d+)x(\d+)/);
           if (match) {
             width = parseInt(match[1], 10);
             height = parseInt(match[2], 10);
-          }
-
-          let batteryLevel = 85;
-          let isCharging = false;
-          try {
-            const batteryOut = execSync(`"${adbPath}" -s ${device} shell dumpsys battery`, { encoding: 'utf-8' });
-            const levelMatch = batteryOut.match(/level:\s*(\d+)/);
-            if (levelMatch) batteryLevel = parseInt(levelMatch[1], 10);
-            const statusMatch = batteryOut.match(/status:\s*(\d+)/);
-            if (statusMatch && statusMatch[1] === '2') isCharging = true;
-          } catch {
-            // fallback
-          }
-
-          let wifiIp = '';
-          try {
-            const ipOut = execSync(`"${adbPath}" -s ${device} shell ip -f inet addr show wlan0`, { encoding: 'utf-8' });
-            const ipMatch = ipOut.match(/inet\s+(\d+\.\d+\.\d+\.\d+)/);
-            if (ipMatch) wifiIp = ipMatch[1];
-          } catch {
-            // fallback
           }
 
           res.setHeader('Content-Type', 'application/json');
@@ -120,9 +99,6 @@ export function adbBridgePlugin(): Plugin {
             osVersion,
             width,
             height,
-            batteryLevel,
-            isCharging,
-            wifiIp,
           }));
         } catch (err: any) {
           res.statusCode = 500;
@@ -131,44 +107,39 @@ export function adbBridgePlugin(): Plugin {
         }
       });
 
-      // 3. Continuous Background Frame Capture Engine
-      let latestFrame: Buffer | null = null;
-      let isWorkerRunning = false;
+      // 3. High-Performance Screen Capture Engine
+      let lastValidFrame: Buffer | null = null;
+      let capturePromise: Promise<Buffer | null> | null = null;
 
-      const grabOneScreencap = (device: string): Promise<Buffer | null> => {
-        return new Promise<Buffer | null>((resolve) => {
-          const proc = spawn(adbPath, ['-s', device, 'exec-out', 'screencap', '-p']);
-          const chunks: Buffer[] = [];
-          proc.stdout.on('data', chunk => chunks.push(chunk));
-          proc.stderr.on('data', () => {});
-          proc.on('close', (code) => {
-            if (code === 0 && chunks.length > 1000) {
-              latestFrame = Buffer.concat(chunks);
-              resolve(latestFrame);
+      const captureScreen = (device: string): Promise<Buffer | null> => {
+        if (capturePromise) {
+          if (lastValidFrame) return Promise.resolve(lastValidFrame);
+          return capturePromise;
+        }
+
+        capturePromise = new Promise<Buffer | null>((resolve) => {
+          execFile(adbPath, ['-s', device, 'exec-out', 'screencap', '-p'], {
+            encoding: 'buffer',
+            maxBuffer: 25 * 1024 * 1024
+          }, (err, stdout) => {
+            capturePromise = null;
+            // Verify valid PNG header (89 50 4E 47)
+            if (!err && stdout && stdout.length > 1000 && stdout[0] === 0x89 && stdout[1] === 0x50) {
+              lastValidFrame = stdout;
+              resolve(stdout);
             } else {
-              resolve(latestFrame);
+              resolve(lastValidFrame);
             }
           });
-          proc.on('error', () => resolve(latestFrame));
         });
+
+        return capturePromise;
       };
 
-      const startCaptureWorker = async (device: string) => {
-        if (isWorkerRunning) return;
-        isWorkerRunning = true;
-        while (isWorkerRunning) {
-          try {
-            await grabOneScreencap(device);
-          } catch {
-            await new Promise(r => setTimeout(r, 200));
-          }
-        }
-      };
-
-      // Start initial background capture
-      const initDev = resolveTargetDevice();
-      if (initDev) {
-        startCaptureWorker(initDev);
+      // Pre-capture frame on startup
+      const initialDev = resolveTargetDevice();
+      if (initialDev) {
+        captureScreen(initialDev);
       }
 
       server.middlewares.use('/api/frame', async (req, res) => {
@@ -181,26 +152,28 @@ export function adbBridgePlugin(): Plugin {
           return res.end('No device connected');
         }
 
-        // Ensure capture loop is active
-        startCaptureWorker(device);
-
-        if (latestFrame && latestFrame.length > 0) {
+        // Always return the latest valid frame immediately if available
+        if (lastValidFrame && lastValidFrame.length > 1000) {
           res.setHeader('Content-Type', 'image/png');
-          res.setHeader('Content-Length', latestFrame.length);
+          res.setHeader('Content-Length', lastValidFrame.length);
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          return res.end(latestFrame);
+          res.end(lastValidFrame);
+
+          // Asynchronously trigger refresh in background
+          captureScreen(device);
+          return;
         }
 
-        // If initial frame is not yet ready, wait for first grab
-        const initial = await grabOneScreencap(device);
-        if (initial && initial.length > 0) {
+        // If no frame yet, wait for first capture
+        const frame = await captureScreen(device);
+        if (frame && frame.length > 1000) {
           res.setHeader('Content-Type', 'image/png');
-          res.setHeader('Content-Length', initial.length);
+          res.setHeader('Content-Length', frame.length);
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          return res.end(initial);
+          res.end(frame);
         } else {
           res.statusCode = 503;
-          return res.end('Display initializing...');
+          res.end('Device screen not ready');
         }
       });
 
@@ -236,51 +209,14 @@ export function adbBridgePlugin(): Plugin {
 
             if (cmd) {
               execSync(cmd);
-              // Trigger immediate screencap after gesture
+              // Trigger fast background capture so the updated screen is captured immediately
               setTimeout(() => {
-                grabOneScreencap(device);
-              }, 120);
+                captureScreen(device);
+              }, 100);
             }
 
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ ok: true }));
-          } catch (err: any) {
-            res.statusCode = 500;
-            res.end(JSON.stringify({ error: err.message }));
-          }
-        });
-      });
-
-      // 5. Wireless ADB Toggle & Connect
-      server.middlewares.use('/api/wireless', (req, res) => {
-        if (req.method !== 'POST') {
-          res.statusCode = 405;
-          return res.end('Method Not Allowed');
-        }
-
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-          try {
-            const data = JSON.parse(body || '{}');
-            const device = resolveTargetDevice(data.device);
-
-            if (data.action === 'enable-tcpip') {
-              if (!device) throw new Error('No device connected via USB to enable TCP/IP mode');
-              execSync(`"${adbPath}" -s ${device} tcpip 5555`);
-              res.setHeader('Content-Type', 'application/json');
-              return res.end(JSON.stringify({ ok: true, message: 'TCP/IP 5555 enabled. You can now disconnect USB.' }));
-            }
-
-            if (data.action === 'connect' && data.ip) {
-              const target = data.ip.includes(':') ? data.ip : `${data.ip}:5555`;
-              const out = execSync(`"${adbPath}" connect ${target}`, { encoding: 'utf-8' });
-              res.setHeader('Content-Type', 'application/json');
-              return res.end(JSON.stringify({ ok: true, output: out.trim() }));
-            }
-
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Invalid wireless action' }));
           } catch (err: any) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: err.message }));
