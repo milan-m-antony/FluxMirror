@@ -75,10 +75,33 @@ void AppController::stopSession() {
 }
 
 void AppController::captureAndCopyScreenshot() {
-    // Triggers screenshot capture directly into system clipboard
     QString serial = m_deviceManager->activeSerial();
-    if (!serial.isEmpty()) {
-        // Run ADB screencap capture and store into clipboard
-        m_mirrorEngine->copyDeviceClipboard();
+    if (serial.isEmpty()) {
+        qWarning() << "[!] Cannot capture screenshot: No active device serial available";
+        return;
     }
+
+    // Capture actual Android device screen asynchronously via ADB screencap
+    QString adb = m_mirrorEngine->findAdb();
+    QProcess *proc = new QProcess(this);
+    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            [this, proc](int exitCode, QProcess::ExitStatus status) {
+        proc->deleteLater();
+        if (exitCode == 0 && status == QProcess::NormalExit) {
+            QByteArray pngData = proc->readAllStandardOutput();
+            QImage img;
+            if (img.loadFromData(pngData, "PNG")) {
+                m_clipboardManager->copyScreenshotToClipboard(img);
+                qInfo() << "[+] Android screenshot copied to Windows clipboard ("
+                        << img.width() << "x" << img.height() << ")";
+            }
+        }
+    });
+
+    proc->start(adb, QStringList{
+        QStringLiteral("-s"), serial,
+        QStringLiteral("exec-out"),
+        QStringLiteral("screencap"),
+        QStringLiteral("-p")
+    });
 }

@@ -103,36 +103,28 @@ if ($Snap) {
     exit 0
 }
 
-# 7. Launch Native Mirror Window
-Write-Host "`n[+] Launching dedicated native mirror window..." -ForegroundColor Cyan
-$scrcpyDir = [System.IO.Path]::GetDirectoryName($nativeBin)
-
-$argsList = @(
-    "-s $targetSerial",
-    "--window-title `"FluxMirror`"",
-    "--max-fps $streamFps",
-    "--video-buffer 0",
-    "--video-codec h264",
-    "--video-bit-rate 16M",
-    "--stay-awake",
-    "--print-fps"
-)
-
-if ($AlwaysOnTop) {
-    $argsList += "--always-on-top"
+# 7. Clean up any previous mirror or dock instances to prevent duplicates
+Get-CimInstance Win32_Process | Where-Object {
+    ($_.Name -like "*scrcpy*") -or
+    ($_.CommandLine -match "screenshot_dock\.ps1")
+} | ForEach-Object {
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }
 
-if ($Wifi) {
-    $argsList += "--tcpip"
+# 8. Launch Native Mirror Window with Integrated Custom Camera Title Bar
+Write-Host "`n[+] Launching FluxMirror with integrated Camera title bar..." -ForegroundColor Cyan
+$hostScript = "$PSScriptRoot\FluxMirrorHost.ps1"
+
+$hostParams = @{
+    Serial = $targetSerial
+    Model = $model
+    Fps = $streamFps
+    NativeBin = $nativeBin
+    Adb = $adb
 }
 
-Start-Process -FilePath $nativeBin -WorkingDirectory $scrcpyDir -ArgumentList ($argsList -join " ")
+if ($AlwaysOnTop) { $hostParams["AlwaysOnTop"] = $true }
+if ($Wifi) { $hostParams["Wifi"] = $true }
 
-# 8. Attach Title Bar Camera Screenshot button & 'Copied to clipboard' toast
-$dockScript = "$rootDir\tools\screenshot_dock.ps1"
-if (Test-Path $dockScript) {
-    Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$dockScript`"" -WindowStyle Hidden
-    Write-Host "[+] Title Bar Camera Screenshot button & 'Copied to clipboard' toast attached!" -ForegroundColor Green
-}
+& $hostScript @hostParams
 
-Write-Host "[+] Native mirror running. Press Ctrl+C or close the mirror window to exit." -ForegroundColor DarkGray
