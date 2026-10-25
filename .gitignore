@@ -3,6 +3,8 @@ build/
 build-win64/
 out/
 bin/
+dist/
+scratch/
 *.exe
 *.dll
 *.obj

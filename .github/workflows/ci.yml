@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-windows:
-    name: Windows UCRT64 Native Build
+    name: Windows UCRT64 Native Build & Package
     runs-on: windows-latest
 
     steps:
@@ -31,12 +31,13 @@ jobs:
       - name: Configure & Compile FluxMirror Native Engine
         shell: msys2 {0}
         run: |
-          meson setup build -Dcompile_server=false -Dprebuilt_server=scrcpy-server -Dportable=true --buildtype=release
-          ninja -C build
+          meson setup build-win64 -Dcompile_server=false -Dprebuilt_server=scrcpy-server -Dportable=true --buildtype=release
+          ninja -C build-win64
           mkdir -p bin
-          cp build/app/scrcpy.exe bin/FluxMirror.exe
+          cp build-win64/app/scrcpy.exe bin/FluxMirror.exe
+          cp build-win64/app/scrcpy.exe bin/scrcpy.exe
 
-      - name: Verify Portable Binary
+      - name: Verify Binary Functionality
         shell: pwsh
         run: |
           if (Test-Path "bin\FluxMirror.exe") {
@@ -47,9 +48,16 @@ jobs:
             exit 1
           }
 
-      - name: Upload Native Executable Artifact
+      - name: Build Standalone Distribution Package
+        shell: pwsh
+        run: |
+          .\scripts\package-release.ps1
+
+      - name: Upload Complete Distribution Package
         uses: actions/upload-artifact@v4
         with:
-          name: FluxMirror-Windows-x64
-          path: bin/FluxMirror.exe
+          name: FluxMirror-Windows-x64-Package
+          path: |
+            dist/FluxMirror-Windows-x64.zip
+            dist/SHA256SUMS.txt
           if-no-files-found: error
